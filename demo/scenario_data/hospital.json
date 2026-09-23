@@ -1,0 +1,70 @@
+{
+  "slug": "hospital",
+  "title": "Медицинское учреждение",
+  "process": "Доставка закрытого контейнера чистого белья с первого этажа в отделение",
+  "unit": "рейс чистого белья",
+  "constraint": "Только чистый поток; грязное бельё не входит в этот маршрут. Межэтажный рейс требует согласования лифта и санитарных зон.",
+  "topology": {
+    "nodes": [
+      {
+        "id": "clean_store",
+        "label": "Склад чистого белья",
+        "floor": 1,
+        "flow": "clean"
+      },
+      {
+        "id": "lift_1",
+        "label": "Грузовой лифт",
+        "floor": "1–3",
+        "flow": "clean"
+      },
+      {
+        "id": "ward",
+        "label": "Чистая зона отделения",
+        "floor": 3,
+        "flow": "clean"
+      }
+    ],
+    "edges": [
+      {
+        "from": "clean_store",
+        "to": "lift_1",
+        "distance_m": 35,
+        "requires": "clean_access"
+      },
+      {
+        "from": "lift_1",
+        "to": "ward",
+        "distance_m": 45,
+        "requires": "lift_booking"
+      }
+    ],
+    "status": "assumption"
+  },
+  "parameters": {
+    "demand": {
+      "value": 12,
+      "unit": "рейсов чистого белья/час",
+      "status": "assumption",
+      "source": "Синтетический пример команды проекта"
+    },
+    "container_mass": {
+      "value": 45,
+      "unit": "кг",
+      "status": "assumption",
+      "source": "Синтетический пример команды проекта"
+    },
+    "lift_wait": {
+      "value": null,
+      "unit": "мин",
+      "status": "missing",
+      "source": "Не измерены ожидание лифта и расписание"
+    },
+    "robot_price": {
+      "value": null,
+      "unit": "руб.",
+      "status": "missing",
+      "source": "Нет подтверждённого коммерческого предложения"
+    }
+  }
+}

@@ -1,0 +1,52 @@
+name: Django checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: robot
+          POSTGRES_PASSWORD: test-password
+          POSTGRES_DB: robot_market
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U robot -d robot_market"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      DJANGO_SECRET_KEY: ci-only-automated-checks-secret-at-least-fifty-characters-long
+      DEBUG: '0'
+      DATABASE_URL: postgresql://robot:test-password@localhost:5432/robot_market
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: ENFORCE_HTTPS=1 python manage.py check --deploy
+      - run: python manage.py makemigrations --check --dry-run
+      - run: python manage.py collectstatic --noinput
+      - run: python manage.py test --verbosity 2
+      - run: python manage.py migrate --noinput
+      - run: python manage.py seed_demo
+      - run: docker build -t robot-market:${{ github.sha }} .
+  deploy:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: preview
+    env:
+      DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+    steps:
+      - name: Publish verified main commit if preview hook is configured
+        if: env.DEPLOY_HOOK != ''
+        run: curl --fail --show-error --silent --max-time 30 --request POST "$DEPLOY_HOOK"
+      - name: Mark deployment as not configured
+        if: env.DEPLOY_HOOK == ''
+        run: echo 'PREVIEW_BLOCKED_BY_ACCESS: no RENDER_DEPLOY_HOOK_URL configured'
