@@ -278,11 +278,12 @@ class ProjectJourneyTests(TestCase):
         self.assertEqual(self.client.get(path).status_code, 404)
         self.assertEqual(self.client.post(f"{path}delete/").status_code, 404)
         self.assertNotContains(self.client.get("/projects/"), "Проект Алисы")
-        own = self.client.post(
-            "/projects/new/hospital/", {"name": "Проект Боба"}
-        )
-        self.assertEqual(own.status_code, 302)
-        self.assertContains(self.client.get("/projects/"), "Проект Боба")
+        for slug in ("warehouse", "airport", "hospital"):
+            own = self.client.post(
+                f"/projects/new/{slug}/", {"name": f"Проект Боба {slug}"}
+            )
+            self.assertEqual(own.status_code, 302)
+            self.assertContains(self.client.get("/projects/"), f"Проект Боба {slug}")
         self.client.force_login(self.alice)
         self.assertContains(self.client.get(path), "Проект Алисы")
         self.assertNotContains(self.client.get("/projects/"), "Проект Боба")
