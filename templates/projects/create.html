@@ -1,0 +1,14 @@
+{% extends 'demo/base.html' %}
+{% block title %}Новый проект — {{ scenario.title }}{% endblock %}
+{% block content %}
+<nav class="breadcrumbs" aria-label="Навигация"><a href="{% url 'index' %}">Все объекты</a><span aria-hidden="true">/</span><a href="{% url 'detail' scenario.slug %}">{{ scenario.title }}</a><span aria-hidden="true">/</span><span>Новый проект</span></nav>
+<section class="detail-hero"><p class="eyebrow">СОХРАНЕНИЕ СЦЕНАРИЯ</p><h1>Новый проект</h1><p class="lead">{{ scenario.title }} · {{ scenario.process }}</p></section>
+<section class="detail-panel account-panel">
+  <p class="detail-intro">Сохранится отдельный снимок текущего демонстрационного паспорта. Изменение открытого примера позже не заменит этот снимок.</p>
+  <form method="post">
+    {% csrf_token %}
+    <p><label for="{{ form.name.id_for_label }}">{{ form.name.label }}</label>{{ form.name }}{% if form.name.errors %}<span role="alert">{{ form.name.errors }}</span>{% endif %}</p>
+    <button class="action-button" type="submit">Создать проект</button>
+  </form>
+</section>
+{% endblock %}

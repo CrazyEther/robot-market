@@ -1,0 +1,17 @@
+{% extends 'demo/base.html' %}
+{% block title %}Мои проекты{% endblock %}
+{% block content %}
+<section class="detail-hero"><p class="eyebrow">ЛИЧНОЕ ПРОСТРАНСТВО</p><h1>Мои проекты</h1><p class="lead">Здесь хранятся ваши сохранённые сценарии для трёх типов объектов.</p></section>
+<div class="detail-grid">
+{% for project in projects %}
+  <article class="detail-panel">
+    <p class="eyebrow">{{ project.get_object_slug_display }}</p>
+    <h2>{{ project.name }}</h2>
+    <p class="detail-intro">Создан {{ project.created_at|date:"d.m.Y H:i" }} · Снимок сценария</p>
+    <a class="api-link" href="{% url 'project_detail' project.id %}">Открыть проект →</a>
+  </article>
+{% empty %}
+  <section class="detail-panel"><h2>Проектов пока нет</h2><p class="detail-intro">Выберите объект и создайте первый сохранённый сценарий.</p><a class="api-link" href="{% url 'index' %}">Выбрать объект →</a></section>
+{% endfor %}
+</div>
+{% endblock %}

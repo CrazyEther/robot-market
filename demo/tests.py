@@ -4,13 +4,16 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import urlopen
 
+from django.contrib.auth import get_user_model
 from django.core.management import call_command
+from django.core.exceptions import ValidationError
 from django.db.utils import OperationalError
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
-from django.test import TestCase, override_settings
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
 from demo.models import DemoScenario
+from projects.models import Project, ProjectRevision
 from demo.catalog import load_demo_catalog
 from demo.matching import evaluate_match
 
@@ -221,3 +224,121 @@ class MarketJourneyTests(TestCase):
         result = evaluate_match(warehouse, robot)
         self.assertEqual(result["status"], "requires_verification")
         self.assertIn("нагрузк", " ".join(result["reasons"]).lower())
+
+
+class ProjectJourneyTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        call_command("seed_demo", verbosity=0)
+        user_model = get_user_model()
+        cls.alice = user_model.objects.create_user(
+            username="alice-test", password="temporary-test-passphrase"
+        )
+        cls.bob = user_model.objects.create_user(
+            username="bob-test", password="temporary-test-passphrase"
+        )
+
+    def test_guest_can_view_demo_but_cannot_create_project(self):
+        self.assertEqual(self.client.get("/").status_code, 200)
+        self.assertEqual(self.client.get("/projects/").status_code, 302)
+        create = self.client.post("/projects/new/warehouse/", {"name": "Чужой проект"})
+        self.assertEqual(create.status_code, 302)
+        self.assertIn("/accounts/login/", create["Location"])
+
+    def test_user_reopens_three_projects_after_new_login(self):
+        self.assertTrue(self.client.login(
+            username="alice-test", password="temporary-test-passphrase"
+        ))
+        paths = []
+        for slug in ("warehouse", "airport", "hospital"):
+            with self.subTest(slug=slug):
+                response = self.client.post(
+                    f"/projects/new/{slug}/", {"name": f"Проект {slug}"}
+                )
+                self.assertEqual(response.status_code, 302)
+                paths.append(response["Location"])
+        self.client.logout()
+        self.assertTrue(self.client.login(
+            username="alice-test", password="temporary-test-passphrase"
+        ))
+        listing = self.client.get("/projects/")
+        self.assertEqual(listing.status_code, 200)
+        for slug, path in zip(("warehouse", "airport", "hospital"), paths):
+            self.assertContains(listing, f"Проект {slug}")
+            self.assertContains(self.client.get(path), f"Проект {slug}")
+
+    def test_other_user_cannot_read_or_delete_project(self):
+        self.client.force_login(self.alice)
+        created = self.client.post(
+            "/projects/new/warehouse/", {"name": "Проект Алисы"}
+        )
+        self.assertEqual(created.status_code, 302)
+        path = created["Location"]
+        self.client.force_login(self.bob)
+        self.assertEqual(self.client.get(path).status_code, 404)
+        self.assertEqual(self.client.post(f"{path}delete/").status_code, 404)
+        self.assertNotContains(self.client.get("/projects/"), "Проект Алисы")
+        own = self.client.post(
+            "/projects/new/hospital/", {"name": "Проект Боба"}
+        )
+        self.assertEqual(own.status_code, 302)
+        self.assertContains(self.client.get("/projects/"), "Проект Боба")
+        self.client.force_login(self.alice)
+        self.assertContains(self.client.get(path), "Проект Алисы")
+        self.assertNotContains(self.client.get("/projects/"), "Проект Боба")
+
+    def test_project_post_requires_csrf_token(self):
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.force_login(self.alice)
+        response = csrf_client.post(
+            "/projects/new/warehouse/", {"name": "Без CSRF"}
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_snapshot_survives_demo_changes_and_revision_cannot_be_edited(self):
+        self.client.force_login(self.alice)
+        created = self.client.post(
+            "/projects/new/airport/", {"name": "Снимок аэропорта"}
+        )
+        self.assertEqual(created.status_code, 302)
+        project = Project.objects.get(owner=self.alice)
+        revision = project.revisions.get(number=1)
+        original_process = revision.scenario_snapshot["process"]
+        scenario = DemoScenario.objects.get(slug="airport")
+        scenario.process = "Позднее изменённый демонстрационный процесс"
+        scenario.save()
+        revision.refresh_from_db()
+        self.assertEqual(revision.scenario_snapshot["process"], original_process)
+        page = self.client.get(created["Location"])
+        self.assertContains(page, original_process)
+        self.assertNotContains(page, scenario.process)
+        revision.scenario_snapshot["process"] = "Тихая замена"
+        with self.assertRaises(ValidationError):
+            revision.save()
+
+    def test_delete_cascades_revisions_and_get_cannot_delete(self):
+        self.client.force_login(self.alice)
+        created = self.client.post(
+            "/projects/new/hospital/", {"name": "На удаление"}
+        )
+        path = created["Location"]
+        self.assertEqual(ProjectRevision.objects.count(), 1)
+        self.assertEqual(self.client.get(f"{path}delete/").status_code, 405)
+        self.assertEqual(self.client.post(f"{path}delete/").status_code, 302)
+        self.assertEqual(Project.objects.count(), 0)
+        self.assertEqual(ProjectRevision.objects.count(), 0)
+
+    def test_invalid_name_creates_nothing_and_admin_requires_staff(self):
+        self.client.force_login(self.alice)
+        response = self.client.post(
+            "/projects/new/warehouse/", {"name": "   "}
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Project.objects.count(), 0)
+        self.assertEqual(self.client.get("/admin/").status_code, 302)
+        staff = get_user_model().objects.create_user(
+            username="staff-test", password="temporary-test-passphrase",
+            is_staff=True,
+        )
+        self.client.force_login(staff)
+        self.assertEqual(self.client.get("/admin/").status_code, 200)
