@@ -2,7 +2,7 @@ name: Django checks
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, 'feature/**']
 jobs:
   test:
     runs-on: ubuntu-latest
