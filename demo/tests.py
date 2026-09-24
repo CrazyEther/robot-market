@@ -5,7 +5,8 @@ from urllib.request import urlopen
 
 from django.core.management import call_command
 from django.db.utils import OperationalError
-from django.test import LiveServerTestCase, TestCase, override_settings
+from django.contrib.staticfiles.testing import StaticLiveServerTestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from demo.models import DemoScenario
@@ -80,7 +81,7 @@ class DemonstrationTests(TestCase):
         self.assertEqual(https_response["Strict-Transport-Security"], "max-age=3600")
 
 
-class HttpJourneyTests(LiveServerTestCase):
+class HttpJourneyTests(StaticLiveServerTestCase):
     """Exercise the actual HTTP server used by the browser, not only Django's test client."""
 
     def setUp(self):
@@ -93,7 +94,7 @@ class HttpJourneyTests(LiveServerTestCase):
     def test_select_each_object_and_open_its_api_over_http(self):
         status, landing = self.request("/")
         self.assertEqual(status, 200)
-        css_url = re.search(r'href="(/static/demo/style[^" ]+\.css)"', landing)
+        css_url = re.search(r'href="(/static/demo/style[^" ]*\.css)"', landing)
         self.assertIsNotNone(css_url, "The homepage must load its own stylesheet")
         self.assertEqual(self.request(css_url.group(1))[0], 200)
         for slug, name in (("warehouse", "Склад"), ("airport", "Аэропорт"), ("hospital", "Медицинское учреждение")):
