@@ -84,6 +84,9 @@ class DemonstrationTests(TestCase):
         self.assertEqual(https_response["Strict-Transport-Security"], "max-age=3600")
 
 
+@override_settings(STORAGES={
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+})
 class HttpJourneyTests(StaticLiveServerTestCase):
     """Exercise the actual HTTP server used by the browser, not only Django's test client."""
 
