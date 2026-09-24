@@ -1,4 +1,5 @@
 import re
+from copy import deepcopy
 from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import urlopen
@@ -10,6 +11,8 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from demo.models import DemoScenario
+from demo.catalog import load_demo_catalog
+from demo.matching import evaluate_match
 
 
 class DemonstrationTests(TestCase):
@@ -103,9 +106,16 @@ class HttpJourneyTests(StaticLiveServerTestCase):
                 status, detail = self.request(f"/objects/{slug}/")
                 self.assertEqual(status, 200)
                 self.assertIn(name, detail)
+                self.assertIn(f"/objects/{slug}/market/", detail)
                 status, data = self.request(f"/api/v1/objects/{slug}/")
                 self.assertEqual(status, 200)
                 self.assertIn(f'"slug": "{slug}"', data)
+                status, market = self.request(f"/objects/{slug}/market/")
+                self.assertEqual(status, 200)
+                self.assertIn("Демонстрационные модели", market)
+                status, matches = self.request(f"/api/v1/objects/{slug}/matches/")
+                self.assertEqual(status, 200)
+                self.assertIn('"requires_verification"', matches)
 
     def test_health_and_ready_over_http(self):
         self.assertEqual(self.request("/health")[0], 200)
@@ -113,3 +123,98 @@ class HttpJourneyTests(StaticLiveServerTestCase):
         with self.assertRaises(HTTPError) as error:
             self.request("/objects/missing/")
         self.assertEqual(error.exception.code, 404)
+
+
+class MarketJourneyTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        call_command("seed_demo", verbosity=0)
+
+    def test_three_objects_explain_candidates_and_keep_price_unknown(self):
+        expected = {
+            "warehouse": ("demo-pallet", "requires_verification"),
+            "airport": ("demo-baggage", "requires_verification"),
+            "hospital": ("demo-care", "requires_verification"),
+        }
+        for slug, (robot_slug, status) in expected.items():
+            with self.subTest(slug=slug):
+                page = self.client.get(f"/objects/{slug}/market/")
+                self.assertEqual(page.status_code, 200)
+                self.assertContains(page, "Демонстрационные модели")
+                self.assertContains(page, robot_slug)
+                api = self.client.get(f"/api/v1/objects/{slug}/matches/")
+                self.assertEqual(api.status_code, 200)
+                matches = {item["robot"]["slug"]: item for item in api.json()["matches"]}
+                self.assertEqual(matches[robot_slug]["status"], status)
+                self.assertTrue(matches[robot_slug]["reasons"])
+                self.assertIsNone(matches[robot_slug]["robot"]["price"]["value"])
+                self.assertEqual(matches[robot_slug]["robot"]["price"]["status"], "missing")
+
+    def test_selection_and_rejection_follow_the_same_match(self):
+        selected = self.client.get("/objects/warehouse/market/?robot=demo-pallet")
+        self.assertEqual(selected.status_code, 200)
+        self.assertContains(selected, "Выбран для сценария")
+        self.assertEqual(
+            self.client.get("/objects/warehouse/market/?robot=demo-compact").status_code,
+            400,
+        )
+        self.assertEqual(
+            self.client.get("/objects/warehouse/market/?robot=unknown").status_code,
+            404,
+        )
+        api = self.client.get("/api/v1/objects/warehouse/matches/")
+        self.assertEqual(api.status_code, 200)
+        matches = {item["robot"]["slug"]: item for item in api.json()["matches"]}
+        self.assertEqual(matches["demo-compact"]["status"], "reject")
+        self.assertIn("грузоподъём", " ".join(matches["demo-compact"]["reasons"]).lower())
+
+    def test_critical_unknowns_do_not_become_fit(self):
+        for slug, robot_slug, missing_text in (
+            ("warehouse", "demo-pallet", "нагрузк"),
+            ("airport", "demo-baggage", "доступ"),
+            ("hospital", "demo-care", "лифт"),
+        ):
+            with self.subTest(slug=slug):
+                api = self.client.get(f"/api/v1/objects/{slug}/matches/")
+                self.assertEqual(api.status_code, 200)
+                matches = api.json()["matches"]
+                chosen = next(item for item in matches if item["robot"]["slug"] == robot_slug)
+                self.assertEqual(chosen["status"], "requires_verification")
+                self.assertIn(missing_text, " ".join(chosen["reasons"]).lower())
+
+    def test_object_specific_rejections_and_unverified_demo_evidence(self):
+        robots = {item["slug"]: item for item in load_demo_catalog()}
+        warehouse = DemoScenario.objects.get(slug="warehouse")
+        wide_robot = deepcopy(robots["demo-pallet"])
+        wide_robot["width"]["value"] = 4
+        self.assertEqual(evaluate_match(warehouse, wide_robot)["status"], "reject")
+
+        airport = DemoScenario.objects.get(slug="airport")
+        airport.parameters["access_permission"]["value"] = False
+        self.assertEqual(evaluate_match(airport, robots["demo-baggage"])["status"], "reject")
+
+        hospital = DemoScenario.objects.get(slug="hospital")
+        incompatible = deepcopy(robots["demo-care"])
+        incompatible["clean_transport"]["value"] = False
+        self.assertEqual(evaluate_match(hospital, incompatible)["status"], "reject")
+        hospital.parameters["lift_wait"]["value"] = 4
+        incompatible["clean_transport"]["value"] = True
+        incompatible["lift_compatible"]["value"] = False
+        self.assertEqual(evaluate_match(hospital, incompatible)["status"], "reject")
+        incompatible["lift_compatible"]["value"] = True
+        result = evaluate_match(hospital, incompatible)
+        self.assertEqual(result["status"], "requires_verification")
+        self.assertIn("допущен", " ".join(result["reasons"]).lower())
+
+    def test_floor_area_rating_cannot_be_compared_with_robot_total_mass(self):
+        warehouse = DemoScenario.objects.get(slug="warehouse")
+        warehouse.parameters["floor_capacity"] = {
+            "value": 5000,
+            "unit": "кг/м²",
+            "status": "assumption",
+            "source": "Синтетический пример",
+        }
+        robot = next(item for item in load_demo_catalog() if item["slug"] == "demo-pallet")
+        result = evaluate_match(warehouse, robot)
+        self.assertEqual(result["status"], "requires_verification")
+        self.assertIn("нагрузк", " ".join(result["reasons"]).lower())
