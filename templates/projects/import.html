@@ -1,0 +1,27 @@
+{% extends 'demo/base.html' %}
+{% block title %}Импорт параметров — {{ project.name }}{% endblock %}
+{% block content %}
+<nav class="breadcrumbs" aria-label="Навигация"><a href="{% url 'project_detail' project.id %}">{{ project.name }}</a><span aria-hidden="true">/</span><span>Импорт</span></nav>
+<section class="detail-hero"><p class="eyebrow">ИМПОРТ · {{ project.get_object_slug_display }}</p><h1>Загрузить параметры</h1><p class="lead">Проверьте параметры перед сохранением. Исходный файл не публикуется; сохраняется снимок значений и контрольная сумма.</p></section>
+<section class="detail-panel input-panel">
+  {% if error %}<p role="alert">{{ error }}</p>{% endif %}
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}<input type="hidden" name="action" value="preview">
+    <label for="profile-file">XLSX с листом «{{ expected_sheet }}» или CSV в UTF-8</label>
+    <input id="profile-file" name="file" type="file" accept=".xlsx,.csv" required>
+    <p class="detail-intro">CSV: object_slug;label;unit;value;min;max;source. Код объекта: {{ project.object_slug }}. Предел файла: 1 МБ. Только обезличенные агрегированные параметры.</p>
+    <button class="action-button" type="submit">Показать предварительный просмотр</button>
+  </form>
+</section>
+{% if preview %}
+<section class="detail-panel preview-panel"><h2>Предварительный просмотр</h2>
+  <p class="detail-intro">Источник: {{ preview.source_type }} · строк: {{ preview.fields|length }} · SHA-256: {{ preview.source_sha256 }}</p>
+  {% if preview.errors %}<div role="alert"><h3>Ошибки импорта</h3><ul>{% for item in preview.errors %}<li>{{ item }}</li>{% endfor %}</ul></div>{% endif %}
+  <div class="preview-table-wrap"><table class="preview-table"><thead><tr><th>Строка</th><th>Параметр</th><th>Исходное</th><th>Значение</th><th>Единица</th><th>Диапазон</th><th>Статус</th></tr></thead><tbody>
+  {% for field in preview.fields %}<tr><td>{{ field.source_sheet|default:"CSV" }}:{{ field.source_row }}</td><td>{{ field.label }}</td><td>{{ field.raw_value|default_if_none:"Нет данных" }}</td><td>{{ field.value|default_if_none:"Нет данных" }}</td><td>{{ field.unit }}</td><td>{{ field.min|default_if_none:"—" }} … {{ field.max|default_if_none:"—" }}</td><td>{% if field.status == 'missing' %}Нет данных{% else %}Допущение{% endif %}</td></tr>{% endfor %}
+  </tbody></table></div>
+  {% if not preview.errors %}<form method="post">{% csrf_token %}<input type="hidden" name="action" value="commit"><button class="action-button" type="submit">Сохранить новую ревизию</button></form>{% endif %}
+</section>
+{% endif %}
+<p><a class="back" href="{% url 'project_detail' project.id %}">← Вернуться к проекту</a></p>
+{% endblock %}
