@@ -35,9 +35,11 @@ PROCESSES = (
     ProcessDefinition(
         "airport_baggage_transport", "airport", "Перевозка багажа",
         "Перемещение багажной тележки между конкретными режимными зонами.",
-        (TaskField("cargo_mass_kg", "Масса тележки с багажом", "кг"),
+        (TaskField("towed_train_mass_kg", "Масса всего буксируемого состава", "кг"),
+         TaskField("required_drawbar_pull_n", "Требуемое тяговое усилие для маршрута", "Н"),
          TaskField("route_width_mm", "Самый узкий участок маршрута", "мм")),
-        ("payload_kg", "minimum_passage_mm", "airside_authorization", "tow_interface"),
+        ("tow_mass_kg", "drawbar_pull_n", "minimum_passage_mm",
+         "airside_authorization", "tow_interface"),
     ),
     ProcessDefinition(
         "airport_terminal_cleaning", "airport", "Уборка терминала",
@@ -76,7 +78,7 @@ PALLET_SPEC_BY_HANDOFF_MODE = {
 BY_CODE = {process.code: process for process in PROCESSES}
 QUALITATIVE_SPECS = frozenset(
     spec for process in PROCESSES for spec in process.required_specs
-    if spec not in {"payload_kg", "minimum_passage_mm"}
+    if spec not in {"payload_kg", "tow_mass_kg", "drawbar_pull_n", "minimum_passage_mm"}
 ) | {"pallet_platform_transport", "pallet_floor_pickup"}
 
 
@@ -87,3 +89,8 @@ def process_for(object_slug, code):
 
 def processes_for(object_slug):
     return tuple(process for process in PROCESSES if process.object_slug == object_slug)
+
+
+def is_transport(process):
+    return any(field.key in {"cargo_mass_kg", "towed_train_mass_kg"}
+               for field in process.fields)

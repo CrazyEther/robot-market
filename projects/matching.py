@@ -6,11 +6,13 @@ from decimal import Decimal, InvalidOperation
 from catalog.models import CatalogEvidenceClaim, SupplementApplication, SupplementSpecification
 from projects.task_profiles import PALLET_SPEC_BY_HANDOFF_MODE
 
-MATCHING_VERSION = 2
+MATCHING_VERSION = 3
 
 
 REQUIREMENT_LABELS = {
     "payload_kg": "Грузоподъёмность",
+    "tow_mass_kg": "Допустимая масса буксируемого состава",
+    "drawbar_pull_n": "Тяговое усилие",
     "minimum_passage_mm": "Ширина маршрута",
     "pallet_loading_interface": "Загрузка и снятие паллеты",
     "pallet_platform_transport": "Перевозка паллеты на платформе",
@@ -25,6 +27,8 @@ REQUIREMENT_LABELS = {
 }
 MEASURED_REQUIREMENTS = {
     "payload_kg": ("cargo_mass_kg", "kg", "Масса груза"),
+    "tow_mass_kg": ("towed_train_mass_kg", "kg", "Масса буксируемого состава"),
+    "drawbar_pull_n": ("required_drawbar_pull_n", "N", "Требуемое тяговое усилие"),
     "minimum_passage_mm": ("route_width_mm", "mm", "Ширина маршрута"),
 }
 
@@ -76,13 +80,11 @@ def _check_requirement(attribute, claims, parameters):
     if observed is None or reported.get("unit") != unit or not reported.get("source"):
         return {"code": "missing_input", "status": "requires_verification", "label": label,
                 "message": f"Укажите «{input_label}» в {unit} и источник значения.", "source_url": source}
-    rejected = observed > capacity if attribute == "payload_kg" else observed < capacity
+    rejected = observed < capacity if attribute == "minimum_passage_mm" else observed > capacity
     if rejected:
-        message = (
-            f"Ширина узкого участка — {observed:g} {unit}; модели нужно не менее {capacity:g} {unit}."
-            if attribute == "minimum_passage_mm" else
-            f"Груз {observed:g} {unit} превышает предел модели {capacity:g} {unit}."
-        )
+        message = (f"Ширина узкого участка — {observed:g} {unit}; модели нужно не менее {capacity:g} {unit}."
+                   if attribute == "minimum_passage_mm" else
+                   f"{input_label}: {observed:g} {unit}; предел модели: {capacity:g} {unit}.")
         return {"code": "physical_limit", "status": "reject", "label": label,
                 "message": message, "source_url": source, "input_source": reported["source"]}
     return {"code": "verified", "status": "pass", "label": label,

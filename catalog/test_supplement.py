@@ -550,6 +550,11 @@ class SupplementProjectSelectionTests(TestCase):
         }).status_code, 302)
         task_url = reverse("project_task", args=[project.id])
         self.assertContains(self.client.get(task_url), eztow.product_url)
+        self.assertContains(self.client.get(task_url), "Требуемое тяговое усилие для маршрута")
+        self.assertEqual(project.revisions.get(number=2).scenario_snapshot[
+            "task_profile"]["version"], 3)
+        self.assertNotIn("cargo_mass_kg", project.revisions.get(number=2).scenario_snapshot[
+            "task_profile"]["parameters"])
         self.assertEqual(self.client.post(reverse("project_robot_selection", args=[project.id]), {
             "action": "select", "source_kind": "manufacturer_supplement",
             "product_ref": eztow.product_ref, "base_revision": "2",
@@ -561,6 +566,10 @@ class SupplementProjectSelectionTests(TestCase):
         self.assertEqual(selected["source_specifications"][0]["attribute"], "drawbar_pull_n")
         self.assertEqual(Decimal(selected["source_specifications"][0]["value"]), Decimal("20000"))
         self.assertEqual(selected["source_specifications"][0]["unit"], "N")
+        checks = {check["label"]: check for check in selected["checks"]}
+        self.assertEqual(checks["Тяговое усилие"]["code"], "missing_input")
+        self.assertEqual(checks["Допустимая масса буксируемого состава"]["code"], "missing_spec")
+        self.assertNotIn("Грузоподъёмность", checks)
         tampered = deepcopy(snapshot)
         tampered["robot_selection"]["selection_ref"]["product_ref"] = "aethon_t3"
         self.assertIsNone(selection_ref(tampered["robot_selection"], tampered))

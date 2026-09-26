@@ -299,7 +299,7 @@ class TaskProfileForm(forms.Form):
                 "status": "user_attested",
             }
         return {
-            "version": 2,
+            "version": 3 if self.process.code == "airport_baggage_transport" else 2,
             "object_slug": self.process.object_slug,
             "process": self.process.code,
             "parameters": parameters,

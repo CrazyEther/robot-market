@@ -2,7 +2,7 @@
 
 from decimal import Decimal, InvalidOperation, ROUND_CEILING
 
-from projects.task_profiles import process_for
+from projects.task_profiles import is_transport, process_for
 from projects.topology import route_result, transport_cycle_route
 from projects.selection_refs import selection_ref, workload_matches_selection
 
@@ -36,10 +36,6 @@ NONNEGATIVE_FIELDS = frozenset({
     "pickup_time_s", "dropoff_time_s", "outbound_elevator_wait_s",
     "inbound_elevator_wait_s", "outbound_elevator_ride_s", "inbound_elevator_ride_s",
 })
-
-
-def is_transport(process):
-    return any(field.key == "cargo_mass_kg" for field in process.fields)
 
 
 def sizing_fields(process):
@@ -156,6 +152,11 @@ def size_project(snapshot, *, manufacturer_speed_limits=()):
     process = process_for(object_slug, task.get("process")) if isinstance(task, dict) else None
     if process is None:
         result["reasons"].append("Сохраните операцию объекта.")
+        return result
+    if process.code == "airport_baggage_transport" and task.get("version") != 3:
+        result["reasons"].append(
+            "Обновите паспорт буксировки: масса состава и требуемое тяговое усилие задаются отдельно."
+        )
         return result
     selection = snapshot.get("robot_selection") or {}
     ref = selection_ref(selection, snapshot)

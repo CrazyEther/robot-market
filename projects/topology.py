@@ -8,7 +8,7 @@ from collections import deque
 from decimal import Decimal, InvalidOperation
 from heapq import heappop, heappush
 
-from projects.task_profiles import process_for
+from projects.task_profiles import is_transport, process_for
 
 
 def empty_topology(object_slug, process):
@@ -133,7 +133,7 @@ def route_result(topology):
 def transport_cycle_route(topology, outbound=None):
     """Measure both legs without assuming that a directed edge permits return."""
     process = process_for(topology.get("object_slug"), topology.get("process"))
-    if process is None or not any(field.key == "cargo_mass_kg" for field in process.fields):
+    if process is None or not is_transport(process):
         return None
     outbound = outbound if outbound is not None else route_result(topology)
     inbound = route_result({**topology, "origin": topology.get("destination"),
