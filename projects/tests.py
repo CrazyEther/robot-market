@@ -25,7 +25,8 @@ from projects.selection_refs import selection_ref
 from projects.models import AvailabilityPlan, OperationLog, Project, ProjectRevision
 from projects.operation_logs import MAX_UPLOAD_BYTES, OperationLogError, parse_operation_log
 from projects.event_ledger import EventInputError, schedule_observed_jobs
-from projects.playback import availability_at_events, measured_scene, movement_timeline, state_before
+from projects.playback import (availability_at_events, measured_scene, movement_timeline,
+                               resource_state_events, state_before)
 from projects.availability import (
     AvailabilityError, available_windows, parse_availability, verified_availability_rows,
 )
@@ -319,6 +320,14 @@ class AvailabilitySourceTests(SimpleTestCase):
         self.assertEqual(len(windows), 2)
         self.assertEqual(len(windows[0]["windows"]), 1)
         self.assertEqual(windows[0]["windows"][0]["source_row"], 2)
+        state_events = resource_state_events(rows, start.isoformat())
+        self.assertEqual(len(state_events), len(rows))
+        self.assertEqual([(event["robot_id"], event["at_s"], event["state"], event["source_row"])
+                          for event in state_events], [
+            ("slot-1", "0", "available", 2),
+            ("slot-2", "0", "available", 4),
+            ("slot-1", "300", "charging", 3),
+        ])
         counts = availability_at_events(rows, [
             {"at_s": "0"}, {"at_s": "300"}, {"at_s": "600"},
         ], start.isoformat())

@@ -193,6 +193,14 @@ class DemandJourneyTests(TestCase):
         self.assertNotEqual(new_run.operation_log_id, run.operation_log_id)
         self.assertNotEqual(new_run.availability_plan_id, run.availability_plan_id)
         self.assertEqual(new_run.ledger["arrivals"], 2)
+        self.assertEqual(len(new_run.resource_events), len(new_run.availability_plan.rows))
+        self.assertEqual(new_run.resource_events[0]["type"], "calendar_state")
+        self.assertEqual(new_run.resource_events[0]["at_s"], "0")
+        self.assertEqual(new_run.resource_events[0]["source_row"],
+                         new_run.availability_plan.rows[0]["source_row"])
+        SimulationRun.objects.filter(pk=new_run.pk).update(resource_events=[])
+        self.assertEqual(self.client.get(compared["Location"]).status_code, 409)
+        SimulationRun.objects.filter(pk=new_run.pk).update(resource_events=new_run.resource_events)
         self.assertContains(self.client.get(compared["Location"]), "Исходный и новый прогон")
         finance_page = self.client.get(reverse("project_finance", args=[project.id]),
                                        {"run": str(new_run.id)})

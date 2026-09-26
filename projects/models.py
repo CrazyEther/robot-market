@@ -131,6 +131,7 @@ class SimulationRun(models.Model):
     ledger_version = models.PositiveSmallIntegerField()
     input_snapshot = models.JSONField()
     ledger = models.JSONField()
+    resource_events = models.JSONField(default=list)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

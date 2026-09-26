@@ -31,6 +31,7 @@ from projects.input_profiles import (
 from projects.models import AvailabilityPlan, FinancePlan, FinanceVariant, OperationLog, Project, ProjectRevision, SimulationRun
 from projects.playback import (PlaybackDataError, availability_at_events,
                                measured_scene, movement_timeline, playback_events,
+                               resource_state_events, RESOURCE_TIMELINE_VERSION,
                                state_before)
 from projects.reports import build_report_bundle
 from projects.availability import (
@@ -961,7 +962,11 @@ def project_simulation(request, project_id):
     if run:
         try:
             _, _, _, calendar_rows = _verified_transport_run(run, project)
-            timeline = playback_events(run.ledger, calendar_rows)
+            timeline = playback_events(
+                run.ledger, calendar_rows,
+                resource_events=(run.resource_events if run.input_snapshot.get(
+                    "resource_timeline_version") == RESOURCE_TIMELINE_VERSION else None),
+            )
             page_text = request.GET.get("page", "1")
             if len(page_text) > 7 or not page_text.isdecimal() or int(page_text) < 1:
                 raise Http404("Страница событий не найдена")
@@ -1031,6 +1036,7 @@ def project_simulation(request, project_id):
                     "availability_sha256": plan.sha256,
                     "operation_log_parser_version": log.parser_version,
                     "availability_parser_version": plan.parser_version,
+                    "resource_timeline_version": RESOURCE_TIMELINE_VERSION,
                     "cycle_semantics": "complete_robot_cycle",
                     "delivery_semantics": "handoff_after_outbound_and_unloading",
                 }
@@ -1038,7 +1044,10 @@ def project_simulation(request, project_id):
                     project=project, revision=revision, operation_log=log,
                     availability_plan=plan, ledger_version=LEDGER_VERSION,
                     defaults={"created_by": request.user,
-                              "input_snapshot": input_snapshot, "ledger": ledger},
+                              "input_snapshot": input_snapshot, "ledger": ledger,
+                              "resource_events": resource_state_events(
+                                  rows, log.period_start_at.isoformat(),
+                              )},
                 )
                 return redirect(
                     f"/projects/{project.id}/simulation/?revision={revision.number}&run={run.id}"
@@ -1118,6 +1127,13 @@ def _verified_transport_run(run, project):
         period_end=run.operation_log.period_end_at,
         origin_node=(snapshot.get("topology_profile") or {}).get("origin"),
     )
+    timeline_version = run.input_snapshot.get("resource_timeline_version")
+    if timeline_version == RESOURCE_TIMELINE_VERSION:
+        if run.resource_events != resource_state_events(
+                calendar, run.operation_log.period_start_at.isoformat()):
+            raise PlaybackDataError("События ресурсов исходного прогона не воспроизводятся.")
+    elif timeline_version is not None or run.resource_events:
+        raise PlaybackDataError("Версия событий ресурсов исходного прогона не поддерживается.")
     source = f"{run.availability_plan.source_description}; SHA-256 {run.availability_plan.sha256}"
     ledger = schedule_observed_jobs(
         [{**job, "service_seconds": sizing["cycle_seconds"],

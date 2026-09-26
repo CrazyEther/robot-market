@@ -16,6 +16,7 @@ CALENDAR_STATE_LABELS = {
     "maintenance": "На обслуживании",
     "downtime": "Простой",
 }
+RESOURCE_TIMELINE_VERSION = 1
 
 
 def _coordinate(node):
@@ -225,7 +226,36 @@ def state_before(events, offset):
             "queued": arrivals - started, "active": active}
 
 
-def playback_events(ledger, calendar_rows):
+def resource_state_events(calendar_rows, period_start):
+    """Preserve every attested state interval boundary in a saved run."""
+    try:
+        origin = datetime.fromisoformat(period_start).astimezone(timezone.utc)
+        events = []
+        for row in calendar_rows:
+            start = datetime.fromisoformat(row["start_at_utc"]).astimezone(timezone.utc)
+            end = datetime.fromisoformat(row["end_at_utc"]).astimezone(timezone.utc)
+            state = row["state"]
+            delta = start - origin
+            end_delta = end - origin
+            at_s = (Decimal(delta.days * 86400 + delta.seconds)
+                    + Decimal(delta.microseconds) / Decimal(1_000_000))
+            end_s = (Decimal(end_delta.days * 86400 + end_delta.seconds)
+                     + Decimal(end_delta.microseconds) / Decimal(1_000_000))
+            if at_s < 0 or end_s <= at_s:
+                raise PlaybackDataError("Границы календаря расходятся с периодом прогона.")
+            events.append({
+                "type": "calendar_state", "at_s": str(at_s), "end_s": str(end_s),
+                "robot_id": f"slot-{row['robot_slot']}", "state": state,
+                "state_label": CALENDAR_STATE_LABELS[state],
+                "source_row": row["source_row"],
+            })
+    except (KeyError, TypeError, ValueError, AttributeError) as exc:
+        raise PlaybackDataError("Сохранённый календарь содержит неверное событие ресурса.") from exc
+    events.sort(key=lambda event: (Decimal(event["at_s"]), event["robot_id"], event["source_row"]))
+    return events
+
+
+def playback_events(ledger, calendar_rows, *, resource_events=None):
     """Interleave attested calendar changes with saved job events for playback.
 
     Calendar boundaries are presentation events. They do not modify the saved
@@ -239,23 +269,26 @@ def playback_events(ledger, calendar_rows):
         return (Decimal(delta.days * 86400 + delta.seconds)
                 + Decimal(delta.microseconds) / Decimal(1_000_000))
 
-    by_robot = {}
-    for row in calendar_rows:
-        by_robot.setdefault(row["robot_slot"], []).append(row)
     events = list(ledger["events"])
-    for slot, rows in by_robot.items():
-        previous_state = None
-        for row in sorted(rows, key=lambda item: item["start_at_utc"]):
-            state = row["state"]
-            if previous_state is not None and state != previous_state:
-                at = datetime.fromisoformat(row["start_at_utc"]).astimezone(timezone.utc)
-                events.append({
-                    "type": "calendar_state", "at_s": str(seconds(at)),
-                    "robot_id": f"slot-{slot}", "state": state,
-                    "state_label": CALENDAR_STATE_LABELS[state],
-                    "source_row": row["source_row"],
-                })
-            previous_state = state
+    if resource_events is not None:
+        events.extend(resource_events)
+    else:
+        by_robot = {}
+        for row in calendar_rows:
+            by_robot.setdefault(row["robot_slot"], []).append(row)
+        for slot, rows in by_robot.items():
+            previous_state = None
+            for row in sorted(rows, key=lambda item: item["start_at_utc"]):
+                state = row["state"]
+                if previous_state is not None and state != previous_state:
+                    at = datetime.fromisoformat(row["start_at_utc"]).astimezone(timezone.utc)
+                    events.append({
+                        "type": "calendar_state", "at_s": str(seconds(at)),
+                        "robot_id": f"slot-{slot}", "state": state,
+                        "state_label": CALENDAR_STATE_LABELS[state],
+                        "source_row": row["source_row"],
+                    })
+                previous_state = state
     events.append({"type": "period_end", "at_s": str(seconds(end))})
     priority = {"calendar_state": 0, "arrival": 1, "handoff": 2,
                 "complete": 3, "start": 4, "period_end": 5}
