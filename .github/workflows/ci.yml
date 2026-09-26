@@ -24,14 +24,10 @@ jobs:
       DATABASE_URL: postgresql://robot:test-password@localhost:5432/robot_market
       CATALOG_SOURCE_URL: ${{ secrets.CATALOG_SOURCE_URL }}
       CATALOG_SOURCE_SHA256: ${{ vars.CATALOG_SOURCE_SHA256 }}
-      CATALOG_SOURCE_PATH: ${{ runner.temp }}/catalog_export_v4.csv
       RESEARCH_CLAIMS_URL: ${{ secrets.RESEARCH_CLAIMS_URL }}
       RESEARCH_CLAIMS_SHA256: ${{ vars.RESEARCH_CLAIMS_SHA256 }}
-      RESEARCH_CLAIMS_PATH: ${{ runner.temp }}/verified_claims.json
       SUPPLEMENT_MANIFEST_URL: ${{ secrets.SUPPLEMENT_MANIFEST_URL }}
       SUPPLEMENT_MANIFEST_SHA256: ${{ vars.SUPPLEMENT_MANIFEST_SHA256 }}
-      SUPPLEMENT_MANIFEST_PATH: ${{ runner.temp }}/supplement-products.json
-      SUPPLEMENT_ASSET_DIR: ${{ runner.temp }}/supplement-assets
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -40,6 +36,12 @@ jobs:
           cache: pip
       - name: Audit public files before installing dependencies
         run: python tools/audit_publication.py
+      - name: Place private source downloads in runner temporary storage
+        run: |
+          echo "CATALOG_SOURCE_PATH=$RUNNER_TEMP/catalog_export_v4.csv" >> "$GITHUB_ENV"
+          echo "RESEARCH_CLAIMS_PATH=$RUNNER_TEMP/verified_claims.json" >> "$GITHUB_ENV"
+          echo "SUPPLEMENT_MANIFEST_PATH=$RUNNER_TEMP/supplement-products.json" >> "$GITHUB_ENV"
+          echo "SUPPLEMENT_ASSET_DIR=$RUNNER_TEMP/supplement-assets" >> "$GITHUB_ENV"
       - run: pip install -r requirements.txt
       - run: ENFORCE_HTTPS=1 python manage.py check --deploy
       - run: python manage.py makemigrations --check --dry-run
