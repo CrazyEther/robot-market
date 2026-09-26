@@ -1,0 +1,30 @@
+{% extends 'demo/base.html' %}
+{% block title %}Календарь роботов — {{ project.name }}{% endblock %}
+{% block content %}
+<nav class="breadcrumbs" aria-label="Навигация"><a href="{% url 'project_list' %}">Мои проекты</a><span aria-hidden="true">/</span><a href="{% url 'project_detail' project.id %}?revision={{ revision.number }}">{{ project.name }}</a><span aria-hidden="true">/</span><span>Календарь роботов</span></nav>
+<section class="detail-hero"><p class="eyebrow">{{ project.get_object_slug_display }} · РЕВИЗИЯ {{ revision.number }}</p><h1>Календарь роботов<span class="hero-period">.</span></h1><p class="lead">{{ process.title }}. Укажите интервалы доступности каждого робота из расчётного парка на период журнала заданий.</p></section>
+{% if historical %}<p class="notice">Сохранённая ревизия. <a href="{% url 'project_availability' project.id %}">Открыть текущую</a></p>{% endif %}
+{% if revision.scenario_snapshot.demand_what_if %}<section class="detail-panel"><p class="eyebrow">СРАВНЕНИЕ СПРОСА</p><h2>Новый парк: {{ sizing.fleet }} роботов</h2><p class="detail-intro">Пиковый поток {{ sizing.peak_demand }} рейсов/ч рассчитан на основании нового журнала. После сохранения календаря выполните событийный прогон; денежное сравнение использует отдельный финансовый план для нового обслуженного объёма.</p><a class="api-link" href="{% url 'project_simulation' project.id %}?revision={{ revision.scenario_snapshot.demand_what_if.parent_revision }}&amp;run={{ revision.scenario_snapshot.demand_what_if.parent_run_id }}">Исходный прогон →</a></section>{% endif %}
+{% if saved_plan %}
+<section class="detail-panel"><p class="eyebrow">СОХРАНЁННЫЙ КАЛЕНДАРЬ</p><h2>{{ saved_plan.fleet }} роботов</h2><p class="detail-intro">{{ saved_plan.source_description }}</p><div class="param-list"><div class="param"><span class="param-name">Интервалы</span><strong>{{ saved_plan.rows|length }}</strong></div><div class="param"><span class="param-name">Журнал заданий</span><strong>{{ log.rows|length }} записей</strong></div></div></section>
+<p><a class="api-link" href="{% url 'project_simulation' project.id %}?revision={{ revision.number }}">Симуляция →</a></p>
+{% endif %}
+{% if not ready %}
+<section class="detail-panel"><h2>Данные для календаря</h2>
+  {% if not log %}<p class="detail-intro">Сохраните журнал заданий для выбранной операции.</p>{% elif not log.period_start_at %}<p class="detail-intro">В журнале нет границ периода наблюдения. Загрузите его с границами периода.</p>{% endif %}
+  {% for reason in sizing.reasons %}<p class="detail-intro">{{ reason }}</p>{% endfor %}
+  <a class="api-link" href="{% url 'project_operation_log' project.id %}?revision={{ revision.number }}">Журнал заданий →</a> <a class="api-link" href="{% url 'project_sizing' project.id %}?revision={{ revision.number }}">Расчёт парка →</a>
+</section>
+{% endif %}
+{% if ready and not historical %}
+<section class="detail-panel account-panel"><p class="eyebrow">ЗАГРУЗКА</p><h2>Интервалы {{ sizing.fleet }} роботов</h2><p class="detail-intro">CSV в UTF-8, колонки <code>robot_slot,start_at,end_at,state,ready_at_node</code>. Номера роботов — от 1 до {{ sizing.fleet }}. Время — ISO 8601 с часовым поясом. Состояния: <code>available</code>, <code>charging</code>, <code>maintenance</code>, <code>downtime</code>. Для каждого интервала <code>available</code> укажите в <code>ready_at_node</code> идентификатор начальной точки сохранённого маршрута <code>{{ origin_node }}</code>; для остальных состояний оставьте эту колонку пустой. Для каждого робота интервалы должны покрывать весь период от {{ log.period_start_at|date:"c" }} до {{ log.period_end_at|date:"c" }} без пробелов и пересечений. Предел — {{ max_upload_mib }} МиБ и 10 000 строк. Не включайте персональные данные.</p>
+  <form method="post" enctype="multipart/form-data">{% csrf_token %}<input type="hidden" name="base_revision" value="{{ base_revision }}">{{ form.non_field_errors }}
+    <p><label for="{{ form.file.id_for_label }}">{{ form.file.label }}</label>{{ form.file }}{{ form.file.errors }}</p>
+    <p><label for="{{ form.source_description.id_for_label }}">{{ form.source_description.label }}</label>{{ form.source_description }}{{ form.source_description.errors }}</p>
+    <p>{{ form.source_attested }}<label for="{{ form.source_attested.id_for_label }}">{{ form.source_attested.label }}</label>{{ form.source_attested.errors }}</p>
+    <button class="action-button" type="submit">Сохранить календарь →</button>
+  </form>
+</section>
+{% endif %}
+<p><a class="back" href="{% url 'project_operation_log' project.id %}?revision={{ revision.number }}">← К журналу заданий</a></p>
+{% endblock %}

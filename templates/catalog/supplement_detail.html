@@ -1,0 +1,23 @@
+{% extends 'demo/base.html' %}
+{% block title %}{{ product.model }} — каталог{% endblock %}
+{% block content %}
+<nav class="breadcrumbs" aria-label="Навигация"><a href="{% url 'catalog_index' %}">Каталог</a><span aria-hidden="true">/</span><span>{{ product.model }}</span></nav>
+<section class="product-hero">
+  <div class="product-hero-visual" aria-hidden="true"><span>{{ product.model|slice:':1' }}</span><small>{{ product.manufacturer }}</small></div>
+  <div class="product-hero-copy">
+    <p class="eyebrow">{{ product.manufacturer }}</p>
+    <h1>{{ product.model }}{% if product.variant != product.model %} · {{ product.variant }}{% endif %}</h1>
+    <a class="action-button" href="{{ product.product_url }}" rel="noopener noreferrer" target="_blank">Страница модели у производителя <span aria-hidden="true">↗</span></a>
+  </div>
+</section>
+<div class="product-detail-grid">
+  <div>
+    {% if specifications %}<section class="product-section"><p class="eyebrow">ХАРАКТЕРИСТИКИ</p><h2>Технические данные</h2><dl class="product-specs">{% for spec in specifications %}<div><dt>{{ spec.label }}</dt><dd>{{ spec.value|floatformat:"-2" }} {{ spec.unit }} <a href="{{ spec.source_url }}" target="_blank" rel="noopener noreferrer" aria-label="Источник характеристики: {{ spec.label }}">↗</a></dd></div>{% endfor %}</dl></section>{% endif %}
+    {% if applications %}<section class="product-section"><p class="eyebrow">ПРИМЕНЕНИЕ</p><h2>Для каких задач</h2><ul class="product-applications">{% for application in applications %}<li><strong>{{ application.title }}</strong><span>{{ application.object_name }}</span><a href="{% url 'project_create' application.object_slug %}">Создать проект →</a></li>{% endfor %}</ul></section>{% endif %}
+  </div>
+  <aside class="product-purchase" aria-label="Стоимость и условия"><p class="eyebrow">УСЛОВИЯ ПРИОБРЕТЕНИЯ</p>
+    {% for offer in offers %}<div class="product-offer"><span>{{ offer.get_kind_display }}</span><strong>{{ offer.price|floatformat:"-2" }} {{ offer.currency }}</strong><p>{{ offer.price_basis }}</p><p>{{ offer.scope }}</p><p>{{ offer.vat_status }} · действует до {{ offer.valid_until|date:"d.m.Y" }}</p><a href="{{ offer.source.url }}" target="_blank" rel="noopener noreferrer">Условия у поставщика ↗</a></div>{% empty %}<p class="product-price-request">Стоимость по запросу</p>{% endfor %}
+  </aside>
+</div>
+<p><a class="back" href="{% url 'catalog_index' %}">← Вернуться в каталог</a></p>
+{% endblock %}

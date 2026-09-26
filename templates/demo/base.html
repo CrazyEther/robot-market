@@ -4,16 +4,17 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Демонстрационный выбор процессов роботизации склада, аэропорта и медицинского учреждения.">
+  <meta name="description" content="Платформа подбора роботизированных решений для склада, аэропорта и медицинского учреждения.">
   <link rel="icon" href="{% static 'demo/favicon.svg' %}" type="image/svg+xml">
   <title>{% block title %}Роботизация объектов{% endblock %} — robot-market</title>
   <link rel="stylesheet" href="{% static 'demo/style.css' %}">
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Перейти к содержимому</a>
   <header class="header">
-    <div class="shell header-row"><a class="brand" href="{% url 'index' %}">robot<span>market</span><span class="brand-dot">.</span></a><span class="header-note">Платформа оценки роботизации <span class="version">· демоверсия</span></span><nav class="header-actions" aria-label="Пользовательское меню">{% if user.is_authenticated %}<a href="{% url 'project_list' %}">Мои проекты</a><form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit">Выйти</button></form>{% else %}<a href="{% url 'login' %}">Войти</a>{% endif %}</nav></div>
+    <div class="shell header-row"><a class="brand" href="{% url 'index' %}" aria-label="robot market — главная">robot<span>market</span><span class="brand-dot">✳</span></a><span class="header-note">Платформа роботизации объектов</span><nav class="header-actions" aria-label="Основная навигация"><a href="{% url 'index' %}#objects">Объекты</a><a href="{% url 'catalog_index' %}">Каталог</a>{% if user.is_authenticated %}<a href="{% url 'project_list' %}">Мои проекты</a>{% if user.is_staff and perms.catalog.add_catalogbatch and perms.catalog.add_catalogevidencebatch %}<a href="{% url 'catalog_source_management' %}">Источники</a>{% endif %}{% if user.is_staff and perms.catalog.add_supplementbatch %}<a href="{% url 'catalog_supplement_management' %}">Модели</a>{% endif %}<form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit">Выйти</button></form>{% else %}<a href="{% url 'login' %}">Войти <span aria-hidden="true">↗</span></a>{% endif %}</nav></div>
   </header>
-  <main class="shell">{% block content %}{% endblock %}</main>
-  <footer class="footer"><div class="shell footer-row"><span>Демонстрационные сценарии · Источники и допущения отмечены</span><span>Инженерная применимость и расчёты требуют проверки</span></div></footer>
+  <main class="shell" id="main-content">{% block content %}{% endblock %}</main>
+  <footer class="footer"><div class="shell footer-row"><a class="brand" href="{% url 'index' %}">robot<span>market</span><span class="brand-dot">✳</span></a><span>Роботизация начинается с проверенных данных.</span><a href="{% url 'catalog_index' %}">Каталог ↗</a></div></footer>
 </body>
 </html>

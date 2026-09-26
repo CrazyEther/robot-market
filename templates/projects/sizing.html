@@ -1,0 +1,24 @@
+{% extends 'demo/base.html' %}
+{% block title %}Парк роботов — {{ project.name }}{% endblock %}
+{% block content %}
+<nav class="breadcrumbs" aria-label="Навигация"><a href="{% url 'project_list' %}">Мои проекты</a><span aria-hidden="true">/</span><a href="{% url 'project_detail' project.id %}?revision={{ revision.number }}">{{ project.name }}</a><span aria-hidden="true">/</span><span>Парк роботов</span></nav>
+<section class="detail-hero"><p class="eyebrow">{{ project.get_object_slug_display }} · РЕВИЗИЯ {{ revision.number }}</p><h1>Парк роботов<span class="hero-period">.</span></h1><p class="lead">{{ process.title }}. Введите показатели пикового часа и условия работы на вашем объекте с источником каждого значения. {% if selection.family_name %}Выбранная модель: {{ selection.family_name }}.{% endif %}</p></section>
+{% if historical %}<p class="notice">Сохранённая ревизия. <a href="{% url 'project_sizing' project.id %}">Открыть текущую</a></p>{% endif %}
+<section class="detail-panel"><p class="eyebrow">01 / ОЦЕНКА</p>{% if result.status == 'estimated' %}<h2>{{ result.fleet }} роботов</h2><p class="detail-intro">Для пикового спроса {{ result.peak_demand }} {{ result.demand_unit }}. Расчётная пропускная способность активного парка: {{ result.capacity_per_hour }} {{ result.demand_unit }}.</p><div class="param-list"><div class="param"><span class="param-name">На заданиях</span><strong>{{ result.active_robots }}</strong></div><div class="param"><span class="param-name">На зарядке / зарядных мест</span><strong>{{ result.chargers }}</strong></div><div class="param"><span class="param-name">Резерв по технической готовности</span><strong>{{ result.reserve_robots }}</strong></div>{% if result.cycle_seconds %}<div class="param"><span class="param-name">Полный транспортный цикл</span><strong>{{ result.cycle_seconds }} с</strong></div>{% endif %}</div><p class="detail-intro">Оценка непрерывного пика по среднему циклу. Время ожидания отдельных заданий зависит от графика их поступления.</p>{% else %}<h2>Данные для расчёта</h2><ul class="topology-list">{% for reason in result.reasons %}<li>{{ reason }}</li>{% endfor %}</ul><div class="project-actions"><a class="api-link" href="{% url 'project_task' project.id %}?revision={{ revision.number }}">Посмотреть подбор →</a><a class="api-link" href="{% url 'project_topology' project.id %}?revision={{ revision.number }}">Проверить маршрут →</a><a class="api-link" href="#operation-inputs">Показатели объекта ↓</a></div>{% endif %}</section>
+<section class="detail-panel" id="operation-inputs">
+  <p class="eyebrow">02 / ЭКСПЛУАТАЦИЯ</p><h2>Показатели объекта</h2>
+  {% if historical %}
+  <div class="param-list">{% for label, unit, field, source_field in field_rows %}{% if field.value is not None %}<div class="param"><span class="param-name">{{ label }}</span><span class="param-value">{{ field.value }} {{ unit }}</span><small>{{ source_field.value }}</small></div>{% endif %}{% endfor %}</div>
+  {% else %}
+  <form method="post" class="topology-form" novalidate>{% csrf_token %}
+    <input type="hidden" name="base_revision" value="{{ base_revision }}">{{ form.non_field_errors }}
+    <div class="sizing-fields">{% for label, unit, field, source_field in field_rows %}
+      <div class="sizing-field"><label for="{{ field.id_for_label }}">{{ label }} <span class="input-unit">· {{ unit }}</span></label>{{ field }}{{ field.errors }}<label for="{{ source_field.id_for_label }}">Источник значения</label>{{ source_field }}{{ source_field.errors }}</div>
+    {% endfor %}</div>
+    <div class="form-attestation">{{ form.source_attested }}<label for="{{ form.source_attested.id_for_label }}">{{ form.source_attested.label }}</label>{{ form.source_attested.errors }}</div>
+    <button class="action-button" type="submit">Сохранить показатели →</button>
+  </form>
+  {% endif %}
+</section>
+<p><a class="back" href="{% url 'project_topology' project.id %}?revision={{ revision.number }}">← К маршруту</a> <a class="api-link" href="{% url 'project_operation_log' project.id %}?revision={{ revision.number }}">Журнал заданий →</a></p>
+{% endblock %}

@@ -1,0 +1,33 @@
+{% extends 'demo/base.html' %}
+{% block title %}Каталог робототехники{% endblock %}
+{% block content %}
+<section class="detail-hero catalog-hero"><p class="eyebrow">МАРКЕТ РОБОТОТЕХНИКИ</p><h1>Найдите решение<br>для вашей задачи<span class="hero-period">.</span></h1><p class="lead">Роботы, автономная техника и оборудование для производственных и сервисных процессов.</p><p class="catalog-count">{{ total_count }} позиций в каталоге</p></section>
+<form method="get" class="catalog-filters" aria-label="Поиск и фильтры каталога">
+  <input type="hidden" name="batch" value="{{ batch.checksum }}">{% if evidence_batch %}<input type="hidden" name="evidence" value="{{ evidence_batch.checksum }}">{% endif %}
+  <label>Поиск по модели или производителю<input type="search" name="q" value="{{ query }}" maxlength="100" placeholder="Название модели"></label>
+  <label>Категория<select name="category"><option value="">Все категории</option>{% for option in categories %}<option value="{{ option }}" {% if option == category %}selected{% endif %}>{{ option }}</option>{% endfor %}</select></label>
+  <label>Отрасль<select name="industry"><option value="">Все отрасли</option>{% for option in industries %}<option value="{{ option }}" {% if option == industry %}selected{% endif %}>{{ option }}</option>{% endfor %}</select></label>
+  <button class="action-button" type="submit">Найти</button>
+</form>
+{% if supplement_cards %}<section aria-labelledby="supplement-products-title"><h2 id="supplement-products-title">Модели для ваших задач</h2><div class="catalog-grid">
+{% for card in supplement_cards %}<article class="product-card">
+  <div class="product-visual" aria-hidden="true"><span>{{ card.product.model|slice:':1' }}</span><small>{{ card.category }}</small></div>
+  <div class="product-body"><p class="product-maker">{{ card.product.manufacturer }}</p><h3><a href="{% url 'catalog_supplement_detail' card.checksum card.product.product_ref %}">{{ card.product.model }}{% if card.product.variant != card.product.model %} · {{ card.product.variant }}{% endif %}</a></h3><p class="product-category">{{ card.category }}</p>
+  {% if card.specifications %}<dl class="product-card-specs">{% for spec in card.specifications %}<div><dt>{{ spec.label }}</dt><dd>{{ spec.value|floatformat:"-2" }} {{ spec.unit }}</dd></div>{% endfor %}</dl>{% endif %}
+  <div class="product-bottom">{% if card.offer %}<p class="product-price">{{ card.offer.price|floatformat:"-2" }} {{ card.offer.currency }}<small>{{ card.offer.get_kind_display }} · {{ card.offer.price_basis }} · {{ card.offer.vat_status }}</small></p>{% elif card.multiple_offers %}<p class="product-price product-price-request">Несколько предложений</p>{% else %}<p class="product-price product-price-request">Стоимость по запросу</p>{% endif %}<a href="{% url 'catalog_supplement_detail' card.checksum card.product.product_ref %}" aria-label="Подробнее: {{ card.product.model }}">Подробнее <span aria-hidden="true">↗</span></a></div></div>
+</article>{% endfor %}
+</div></section>{% endif %}
+<div class="catalog-grid">
+{% for card in cards %}
+<article class="product-card">
+  <div class="product-visual" aria-hidden="true"><span>{{ card.family.name|slice:':1' }}</span><small>{{ card.family.subtype|default:card.family.type_label }}</small></div>
+  <div class="product-body"><p class="product-maker">{{ card.family.company }}</p><h2><a href="{% url 'catalog_family_detail' card.family.id %}?evidence={{ evidence_batch.checksum|default:''|urlencode }}">{{ card.family.name }}</a></h2><p class="product-category">{{ card.family.subtype|default:card.family.type_label }}</p>
+  {% if card.description %}<p class="product-description">{{ card.description|truncatechars:170 }}</p>{% endif %}
+  {% if card.specifications %}<dl class="product-card-specs">{% for spec in card.specifications %}<div><dt>{{ spec.display_label }}</dt><dd>{{ spec.display_value }} {{ spec.display_unit }}</dd></div>{% endfor %}</dl>{% endif %}
+  <div class="product-bottom">{% if card.price %}<p class="product-price">{% if card.price.attribute == 'purchase_price_floor' or card.price.attribute == 'rental_price_floor' %}от {% endif %}{{ card.price.display_value }} {{ card.price.display_unit }}{% if card.price.scope %}<small>{{ card.price.scope }}</small>{% endif %}</p>{% else %}<p class="product-price product-price-request">Стоимость по запросу</p>{% endif %}<a href="{% url 'catalog_family_detail' card.family.id %}?evidence={{ evidence_batch.checksum|default:''|urlencode }}" aria-label="Подробнее: {{ card.family.name }}">Подробнее <span aria-hidden="true">↗</span></a></div>
+  </div>
+</article>
+{% empty %}{% if not supplement_cards %}<section class="detail-panel"><h2>По запросу ничего не найдено</h2><p class="detail-intro">Измените поисковый запрос или фильтры.</p></section>{% endif %}{% endfor %}
+</div>
+<nav class="catalog-pages" aria-label="Страницы каталога">{% if page.has_previous %}<a href="?batch={{ batch.checksum|urlencode }}&amp;evidence={{ evidence_batch.checksum|default:''|urlencode }}&amp;q={{ query|urlencode }}&amp;kind={{ kind|urlencode }}&amp;category={{ category|urlencode }}&amp;industry={{ industry|urlencode }}&amp;page={{ page.previous_page_number }}">← Назад</a>{% endif %}<span>Страница {{ page.number }} из {{ page.paginator.num_pages }}</span>{% if page.has_next %}<a href="?batch={{ batch.checksum|urlencode }}&amp;evidence={{ evidence_batch.checksum|default:''|urlencode }}&amp;q={{ query|urlencode }}&amp;kind={{ kind|urlencode }}&amp;category={{ category|urlencode }}&amp;industry={{ industry|urlencode }}&amp;page={{ page.next_page_number }}">Далее →</a>{% endif %}</nav>
+{% endblock %}

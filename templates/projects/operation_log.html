@@ -1,0 +1,27 @@
+{% extends 'demo/base.html' %}
+{% block title %}Журнал заданий — {{ project.name }}{% endblock %}
+{% block content %}
+<nav class="breadcrumbs" aria-label="Навигация"><a href="{% url 'project_list' %}">Мои проекты</a><span aria-hidden="true">/</span><a href="{% url 'project_detail' project.id %}?revision={{ revision.number }}">{{ project.name }}</a><span aria-hidden="true">/</span><span>Журнал заданий</span></nav>
+<section class="detail-hero"><p class="eyebrow">{{ project.get_object_slug_display }} · РЕВИЗИЯ {{ revision.number }}</p><h1>Журнал заданий<span class="hero-period">.</span></h1><p class="lead">{{ process.title }}. Загрузите времена поступления заданий, выгруженные из системы объекта. Они определяют порядок заданий.</p></section>
+{% if historical %}<p class="notice">Сохранённая ревизия. <a href="{% url 'project_operation_log' project.id %}">Открыть текущую</a></p>{% endif %}
+{% if saved_log %}
+<section class="detail-panel"><p class="eyebrow">ИСТОЧНИК ЗАДАНИЙ</p><h2>{{ saved_log.rows|length }} записей</h2><p class="detail-intro">{{ saved_log.source_description }}</p><div class="param-list">
+  {% if saved_log.period_start_at %}<div class="param"><span class="param-name">Начало наблюдения</span><strong>{{ saved_log.period_start_at|date:"c" }}</strong></div><div class="param"><span class="param-name">Конец наблюдения</span><strong>{{ saved_log.period_end_at|date:"c" }}</strong></div>{% endif %}
+  <div class="param"><span class="param-name">Первое задание</span><strong>{{ first_at }}</strong></div><div class="param"><span class="param-name">Последнее задание</span><strong>{{ last_at }}</strong></div>
+</div></section>
+{% endif %}
+{% if not historical %}
+<section class="detail-panel account-panel"><p class="eyebrow">ЗАГРУЗКА</p><h2>Журнал операций</h2><p class="detail-intro">CSV в UTF-8, две колонки <code>requested_at,work_units</code>. Время — ISO 8601 с часовым поясом, строки идут по времени. Для перевозки каждая строка — один рейс, значение <code>work_units</code> равно 1. Для уборки укажите площадь задания в м² с точностью до 0,001 м². Начало периода включается, конец не включается. Не включайте имена, номера пациентов, багажные бирки и другие идентификаторы. Предел — {{ max_upload_mib }} МиБ и 10 000 строк.</p>
+  <form method="post" enctype="multipart/form-data">{% csrf_token %}<input type="hidden" name="base_revision" value="{{ base_revision }}">{{ form.non_field_errors }}
+    <p><label for="{{ form.file.id_for_label }}">{{ form.file.label }}</label>{{ form.file }}{{ form.file.errors }}</p>
+    <p><label for="{{ form.period_start.id_for_label }}">{{ form.period_start.label }}</label>{{ form.period_start }}{{ form.period_start.errors }}</p>
+    <p><label for="{{ form.period_end.id_for_label }}">{{ form.period_end.label }}</label>{{ form.period_end }}{{ form.period_end.errors }}</p>
+    <p><label for="{{ form.source_description.id_for_label }}">{{ form.source_description.label }}</label>{{ form.source_description }}{{ form.source_description.errors }}</p>
+    <p>{{ form.source_attested }}<label for="{{ form.source_attested.id_for_label }}">{{ form.source_attested.label }}</label>{{ form.source_attested.errors }}</p>
+    <button class="action-button" type="submit">Сохранить журнал →</button>
+  </form>
+</section>
+{% endif %}
+{% if saved_log %}<p><a class="api-link" href="{% url 'project_availability' project.id %}?revision={{ revision.number }}">Календарь роботов →</a></p>{% endif %}
+<p><a class="back" href="{% url 'project_sizing' project.id %}?revision={{ revision.number }}">← К расчёту парка</a></p>
+{% endblock %}

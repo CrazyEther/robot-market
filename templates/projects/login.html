@@ -1,7 +1,7 @@
 {% extends 'demo/base.html' %}
 {% block title %}Вход{% endblock %}
 {% block content %}
-<section class="detail-hero"><p class="eyebrow">ЛИЧНОЕ ПРОСТРАНСТВО</p><h1>Вход в проекты</h1><p class="lead">Авторизованные пользователи могут сохранять собственные сценарии. Публичное демо доступно без входа.</p></section>
+<section class="detail-hero"><p class="eyebrow">ЛИЧНОЕ ПРОСТРАНСТВО</p><h1>Вход в проекты</h1><p class="lead">Войдите, чтобы создавать проекты и сохранять ревизии параметров объекта. Каталог и описания объектов доступны без входа.</p></section>
 <section class="detail-panel account-panel">
   {% if form.errors %}<p role="alert">Проверьте имя пользователя и пароль.</p>{% endif %}
   <form method="post">
@@ -11,5 +11,6 @@
     <input type="hidden" name="next" value="{{ next }}">
     <button class="action-button" type="submit">Войти</button>
   </form>
+  <p>Нет учётной записи? <a href="{% url 'register' %}{% if next %}?next={{ next|urlencode }}{% endif %}">Создать учётную запись</a></p>
 </section>
 {% endblock %}

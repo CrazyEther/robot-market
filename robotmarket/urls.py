@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth import views as auth_views
 from django.urls import include, path
+from projects.auth_views import register
 
 
 urlpatterns = [
@@ -15,6 +16,8 @@ urlpatterns = [
         auth_views.LogoutView.as_view(next_page="/"),
         name="logout",
     ),
+    path("accounts/register/", register, name="register"),
     path("projects/", include("projects.urls")),
+    path("catalog/", include("catalog.urls")),
     path("", include("demo.urls")),
 ]

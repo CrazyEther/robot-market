@@ -11,6 +11,8 @@ services:
         value: '0'
       - key: ENFORCE_HTTPS
         value: '1'
+      - key: TRUST_PROXY_SSL_HEADER
+        value: '1'
       - key: DJANGO_SECRET_KEY
         generateValue: true
       - key: ALLOWED_HOSTS
@@ -19,6 +21,14 @@ services:
         fromDatabase:
           name: robot-market-preview-db
           property: connectionString
+      - key: CATALOG_SOURCE_URL
+        sync: false
+      - key: CATALOG_SOURCE_SHA256
+        sync: false
+      - key: RESEARCH_CLAIMS_URL
+        sync: false
+      - key: RESEARCH_CLAIMS_SHA256
+        sync: false
 databases:
   - name: robot-market-preview-db
     databaseName: robot_market

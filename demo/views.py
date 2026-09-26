@@ -1,14 +1,21 @@
 from django.db import connection
 from django.db.utils import OperationalError
-from django.http import Http404, HttpResponseBadRequest, JsonResponse
-from django.shortcuts import get_object_or_404, render
+from django.http import Http404, JsonResponse
+from django.shortcuts import render
 from django.views.decorators.http import require_GET
 
-from demo.models import DemoScenario
-from demo.catalog import load_demo_catalog
-from demo.matching import evaluate_match
-from demo.snapshots import PARAMETER_LABELS, snapshot_scenario
+from catalog.publication import current_source_pair
 from projects.models import Project
+
+
+OBJECT_TITLES = dict(Project.OBJECT_TYPES)
+
+
+def _object_title(slug):
+    try:
+        return OBJECT_TITLES[slug]
+    except KeyError:
+        raise Http404("Тип объекта не найден") from None
 
 
 @require_GET
@@ -22,73 +29,37 @@ def ready(request):
         with connection.cursor() as cursor:
             cursor.execute("SELECT 1")
             cursor.fetchone()
-        # A schema check catches an unmigrated installation.
-        DemoScenario.objects.exists()
         Project.objects.exists()
+        batch, evidence_batch = current_source_pair()
+        if batch is None or evidence_batch is None:
+            return JsonResponse({"status": "not_ready"}, status=503)
     except OperationalError:
         return JsonResponse({"status": "not_ready"}, status=503)
-    except Exception:  # Missing schema or database connectivity is not readiness.
+    except Exception:
         return JsonResponse({"status": "not_ready"}, status=503)
     return JsonResponse({"status": "ready"})
 
 
 @require_GET
 def index(request):
-    return render(request, "demo/index.html", {"scenarios": DemoScenario.objects.all()})
+    return render(request, "demo/index.html", {"object_types": Project.OBJECT_TYPES})
 
 
 @require_GET
 def detail(request, slug):
-    scenario = get_object_or_404(DemoScenario, slug=slug)
-    parameters = [
-        {"label": PARAMETER_LABELS.get(code, code), **field}
-        for code, field in scenario.parameters.items()
-    ]
-    return render(request, "demo/detail.html", {"scenario": scenario, "parameters": parameters})
-
-
-def _matches_for(scenario):
-    return [evaluate_match(scenario, robot) for robot in load_demo_catalog()]
-
-
-@require_GET
-def market(request, slug):
-    scenario = get_object_or_404(DemoScenario, slug=slug)
-    matches = _matches_for(scenario)
-    selected_slug = request.GET.get("robot")
-    selected = None
-    if selected_slug:
-        selected = next(
-            (item for item in matches if item["robot"]["slug"] == selected_slug),
-            None,
-        )
-        if selected is None:
-            raise Http404("Демонстрационная модель не найдена")
-        if selected["status"] == "reject":
-            return HttpResponseBadRequest("Модель не подходит для выбранного процесса")
-    return render(
-        request,
-        "demo/market.html",
-        {"scenario": scenario, "matches": matches, "selected": selected},
-    )
-
-
-@require_GET
-def matches_api(request, slug):
-    scenario = get_object_or_404(DemoScenario, slug=slug)
-    return JsonResponse({"object": scenario.slug, "matches": _matches_for(scenario)})
-
-
-def serialize(scenario):
-    return snapshot_scenario(scenario)
+    return render(request, "demo/detail.html", {
+        "object_slug": slug,
+        "object_title": _object_title(slug),
+    })
 
 
 @require_GET
 def objects_api(request):
-    return JsonResponse({"objects": [serialize(s) for s in DemoScenario.objects.all()]})
+    return JsonResponse({"objects": [
+        {"slug": slug, "title": title} for slug, title in Project.OBJECT_TYPES
+    ]})
 
 
 @require_GET
 def object_api(request, slug):
-    scenario = get_object_or_404(DemoScenario, slug=slug)
-    return JsonResponse(serialize(scenario))
+    return JsonResponse({"slug": slug, "title": _object_title(slug)})
