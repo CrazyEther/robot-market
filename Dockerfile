@@ -6,6 +6,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY manage.py ./
 COPY robotmarket/ robotmarket/
 COPY demo/ demo/
+COPY projects/ projects/
 COPY templates/ templates/
 COPY static/ static/
 RUN DJANGO_SECRET_KEY=build-only-secret DEBUG=0 python manage.py collectstatic --noinput

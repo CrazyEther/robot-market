@@ -7,17 +7,8 @@ from django.views.decorators.http import require_GET
 from demo.models import DemoScenario
 from demo.catalog import load_demo_catalog
 from demo.matching import evaluate_match
-
-PARAMETER_LABELS = {
-    "demand": "Интенсивность перевозок",
-    "pallet_mass": "Масса паллеты",
-    "shift_hours": "Продолжительность смены",
-    "robot_payload": "Грузоподъёмность робота",
-    "robot_price": "Стоимость робота",
-    "container_mass": "Масса контейнера",
-    "access_permission": "Разрешение на доступ",
-    "lift_wait": "Ожидание лифта",
-}
+from demo.snapshots import PARAMETER_LABELS, snapshot_scenario
+from projects.models import Project
 
 
 @require_GET
@@ -33,6 +24,7 @@ def ready(request):
             cursor.fetchone()
         # A schema check catches an unmigrated installation.
         DemoScenario.objects.exists()
+        Project.objects.exists()
     except OperationalError:
         return JsonResponse({"status": "not_ready"}, status=503)
     except Exception:  # Missing schema or database connectivity is not readiness.
@@ -88,16 +80,7 @@ def matches_api(request, slug):
 
 
 def serialize(scenario):
-    return {
-        "slug": scenario.slug,
-        "title": scenario.title,
-        "process": scenario.process,
-        "unit": scenario.unit,
-        "constraint": scenario.constraint,
-        "topology": scenario.topology,
-        "parameters": scenario.parameters,
-        "data_status": scenario.data_status,
-    }
+    return snapshot_scenario(scenario)
 
 
 @require_GET

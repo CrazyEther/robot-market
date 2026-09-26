@@ -11,7 +11,7 @@
 </head>
 <body>
   <header class="header">
-    <div class="shell header-row"><a class="brand" href="{% url 'index' %}">robot<span>market</span><span class="brand-dot">.</span></a><span class="header-note">Платформа оценки роботизации <span class="version">· демоверсия</span></span></div>
+    <div class="shell header-row"><a class="brand" href="{% url 'index' %}">robot<span>market</span><span class="brand-dot">.</span></a><span class="header-note">Платформа оценки роботизации <span class="version">· демоверсия</span></span><nav class="header-actions" aria-label="Пользовательское меню">{% if user.is_authenticated %}<a href="{% url 'project_list' %}">Мои проекты</a><form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit">Выйти</button></form>{% else %}<a href="{% url 'login' %}">Войти</a>{% endif %}</nav></div>
   </header>
   <main class="shell">{% block content %}{% endblock %}</main>
   <footer class="footer"><div class="shell footer-row"><span>Демонстрационные сценарии · Синтетические параметры</span><span>Инженерная применимость и расчёты требуют проверки</span></div></footer>

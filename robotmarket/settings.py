@@ -22,6 +22,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "demo",
+    "projects",
 ]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -57,6 +58,9 @@ STATICFILES_DIRS = [BASE_DIR / "static"]
 if not DEBUG:
     STORAGES = {"staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"}}
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+LOGIN_URL = "/accounts/login/"
+LOGIN_REDIRECT_URL = "/projects/"
+LOGOUT_REDIRECT_URL = "/"
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
