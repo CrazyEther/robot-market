@@ -52,8 +52,11 @@ PROCESSES = (
         "hospital_meal_delivery", "hospital", "Доставка питания",
         "Перевозка тележки из пищеблока в выбранное отделение.",
         (TaskField("cargo_mass_kg", "Масса тележки с питанием", "кг"),
+         TaskField("cart_length_mm", "Длина тележки", "мм"),
+         TaskField("cart_width_mm", "Ширина тележки", "мм"),
          TaskField("route_width_mm", "Самый узкий участок маршрута", "мм")),
-        ("payload_kg", "minimum_passage_mm", "food_hygiene", "elevator_interface"),
+        ("payload_kg", "max_cart_length_mm", "max_cart_width_mm",
+         "minimum_passage_mm", "food_hygiene", "elevator_interface"),
     ),
     ProcessDefinition(
         "hospital_floor_cleaning", "hospital", "Уборка помещений",
@@ -78,7 +81,8 @@ PALLET_SPEC_BY_HANDOFF_MODE = {
 BY_CODE = {process.code: process for process in PROCESSES}
 QUALITATIVE_SPECS = frozenset(
     spec for process in PROCESSES for spec in process.required_specs
-    if spec not in {"payload_kg", "tow_mass_kg", "drawbar_pull_n", "minimum_passage_mm"}
+    if spec not in {"payload_kg", "tow_mass_kg", "drawbar_pull_n", "max_cart_length_mm",
+                    "max_cart_width_mm", "minimum_passage_mm"}
 ) | {"pallet_platform_transport", "pallet_floor_pickup"}
 
 

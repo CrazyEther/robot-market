@@ -460,6 +460,10 @@ class SupplementProjectSelectionTests(TestCase):
         self.assertEqual(project.revisions.get(number=3).scenario_snapshot["supplement_checksum"],
                          self.supplement.checksum)
         self.assertContains(self.client.get(task_url), self.product.product_url)
+        self.assertContains(self.client.get(task_url), "Длина тележки")
+        self.assertContains(self.client.get(task_url), "Ширина тележки")
+        self.assertEqual(project.revisions.get(number=3).scenario_snapshot[
+            "task_profile"]["version"], 3)
         self.assertEqual(self.client.post(choice_url, {
             "action": "select", "source_kind": "manufacturer_supplement",
             "product_ref": "not_in_published_source", "base_revision": "3",
@@ -471,6 +475,12 @@ class SupplementProjectSelectionTests(TestCase):
         snapshot = project.revisions.get(number=4).scenario_snapshot
         selected = snapshot["robot_selection"]
         self.assertEqual(selected["status"], "requires_verification")
+        checks = {check["label"]: check for check in selected["checks"]}
+        self.assertEqual(checks["Допустимая длина тележки"]["code"], "missing_input")
+        self.assertEqual(checks["Допустимая ширина тележки"]["code"], "missing_input")
+        specifications = {spec["attribute"]: spec for spec in selected["source_specifications"]}
+        self.assertEqual(Decimal(specifications["max_cart_length_mm"]["value"]), Decimal("1117.6"))
+        self.assertEqual(Decimal(specifications["max_cart_width_mm"]["value"]), Decimal("813"))
         self.assertEqual(selected["source_specifications"][0]["source_sha256"],
                          self.supplement.source_artifacts.get(
                              source_ref="aethon_t3_specification",
@@ -480,6 +490,9 @@ class SupplementProjectSelectionTests(TestCase):
                          selection_key(selection_ref(selected, snapshot)))
         self.assertNotIn("record_index", selected)
         self.assertIsNone(size_project(snapshot)["fleet"])
+        old_contract = deepcopy(snapshot)
+        old_contract["task_profile"]["version"] = 2
+        self.assertIn("Обновите паспорт доставки питания", size_project(old_contract)["reasons"][0])
         self.assertEqual(self.client.post(reverse("project_simulation", args=[project.id]), {
             "base_revision": "4",
         }).status_code, 409)

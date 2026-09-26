@@ -6,13 +6,15 @@ from decimal import Decimal, InvalidOperation
 from catalog.models import CatalogEvidenceClaim, SupplementApplication, SupplementSpecification
 from projects.task_profiles import PALLET_SPEC_BY_HANDOFF_MODE
 
-MATCHING_VERSION = 3
+MATCHING_VERSION = 4
 
 
 REQUIREMENT_LABELS = {
     "payload_kg": "Грузоподъёмность",
     "tow_mass_kg": "Допустимая масса буксируемого состава",
     "drawbar_pull_n": "Тяговое усилие",
+    "max_cart_length_mm": "Допустимая длина тележки",
+    "max_cart_width_mm": "Допустимая ширина тележки",
     "minimum_passage_mm": "Ширина маршрута",
     "pallet_loading_interface": "Загрузка и снятие паллеты",
     "pallet_platform_transport": "Перевозка паллеты на платформе",
@@ -29,6 +31,8 @@ MEASURED_REQUIREMENTS = {
     "payload_kg": ("cargo_mass_kg", "kg", "Масса груза"),
     "tow_mass_kg": ("towed_train_mass_kg", "kg", "Масса буксируемого состава"),
     "drawbar_pull_n": ("required_drawbar_pull_n", "N", "Требуемое тяговое усилие"),
+    "max_cart_length_mm": ("cart_length_mm", "mm", "Длина тележки"),
+    "max_cart_width_mm": ("cart_width_mm", "mm", "Ширина тележки"),
     "minimum_passage_mm": ("route_width_mm", "mm", "Ширина маршрута"),
 }
 

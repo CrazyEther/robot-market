@@ -158,6 +158,11 @@ def size_project(snapshot, *, manufacturer_speed_limits=()):
             "Обновите паспорт буксировки: масса состава и требуемое тяговое усилие задаются отдельно."
         )
         return result
+    if process.code == "hospital_meal_delivery" and task.get("version") != 3:
+        result["reasons"].append(
+            "Обновите паспорт доставки питания: длина и ширина тележки задаются отдельно."
+        )
+        return result
     selection = snapshot.get("robot_selection") or {}
     ref = selection_ref(selection, snapshot)
     if (not isinstance(selection, dict) or selection.get("process") != process.code
