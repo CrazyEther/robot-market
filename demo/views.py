@@ -1,10 +1,12 @@
 from django.db import connection
 from django.db.utils import OperationalError
-from django.http import JsonResponse
+from django.http import Http404, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.views.decorators.http import require_GET
 
 from demo.models import DemoScenario
+from demo.catalog import load_demo_catalog
+from demo.matching import evaluate_match
 
 PARAMETER_LABELS = {
     "demand": "Интенсивность перевозок",
@@ -51,6 +53,38 @@ def detail(request, slug):
         for code, field in scenario.parameters.items()
     ]
     return render(request, "demo/detail.html", {"scenario": scenario, "parameters": parameters})
+
+
+def _matches_for(scenario):
+    return [evaluate_match(scenario, robot) for robot in load_demo_catalog()]
+
+
+@require_GET
+def market(request, slug):
+    scenario = get_object_or_404(DemoScenario, slug=slug)
+    matches = _matches_for(scenario)
+    selected_slug = request.GET.get("robot")
+    selected = None
+    if selected_slug:
+        selected = next(
+            (item for item in matches if item["robot"]["slug"] == selected_slug),
+            None,
+        )
+        if selected is None:
+            raise Http404("Демонстрационная модель не найдена")
+        if selected["status"] == "reject":
+            return HttpResponseBadRequest("Модель не подходит для выбранного процесса")
+    return render(
+        request,
+        "demo/market.html",
+        {"scenario": scenario, "matches": matches, "selected": selected},
+    )
+
+
+@require_GET
+def matches_api(request, slug):
+    scenario = get_object_or_404(DemoScenario, slug=slug)
+    return JsonResponse({"object": scenario.slug, "matches": _matches_for(scenario)})
 
 
 def serialize(scenario):
