@@ -1,0 +1,6 @@
+{% extends 'demo/base.html' %}
+{% block title %}Выбор модели — {{ project.name }}{% endblock %}
+{% block content %}
+<nav class="breadcrumbs"><a href="{% url 'project_detail' project.id %}">{{ project.name }}</a><span aria-hidden="true">/</span><span>Выбор модели</span></nav>
+<section class="detail-panel account-panel"><p class="eyebrow">МОДЕЛЬ В ПРОЕКТЕ</p><h1>Не удалось сохранить выбор</h1><p role="alert">{{ message }}</p><a class="api-link" href="{% url 'project_task' project.id %}">Вернуться к подбору →</a></section>
+{% endblock %}

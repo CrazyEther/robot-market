@@ -1,0 +1,33 @@
+{% extends 'demo/base.html' %}
+{% block title %}Платформа роботизации объектов{% endblock %}
+{% block content %}
+<section class="hero" aria-labelledby="home-title">
+  <div class="hero-main">
+    <p class="eyebrow"><span class="eyebrow-line"></span> ПЛАТФОРМА ВЫБОРА РОБОТОВ</p>
+    <div class="hero-headline"><h1 id="home-title">Роботы<br>под <em>задачу</em><span class="hero-period">.</span></h1><div class="hero-art" aria-hidden="true"><span class="art-gridline art-gridline-one"></span><span class="art-gridline art-gridline-two"></span><span class="art-path"></span><span class="art-point art-point-first"></span><span class="art-point art-point-second"></span><span class="art-point art-point-third"></span><span class="art-label art-label-first">ОБЪЕКТ</span><span class="art-label art-label-second">МОДЕЛЬ</span><span class="art-label art-label-third">ПРОГОН</span></div></div>
+    <div class="hero-lower"><p class="lead">Для склада, аэропорта и медицинского учреждения: опишите задачу, выберите оборудование, рассчитайте парк и сравните варианты внедрения.</p><a class="text-action" href="#objects">Выбрать объект <span aria-hidden="true">↘</span></a></div>
+  </div>
+  <nav class="hero-object-nav" aria-label="Выбрать тип объекта">{% for slug, title in object_types %}<a href="{% url 'detail' slug %}"><span>0{{ forloop.counter }} / 03</span><strong>{{ title }}</strong><span aria-hidden="true">↗</span></a>{% endfor %}</nav>
+</section>
+
+<section class="selection" id="objects" aria-labelledby="object-heading">
+  <div class="section-header"><div><p class="eyebrow">01 / СРЕДА ПРИМЕНЕНИЯ</p><h2 id="object-heading">Три объекта.<br><em>Три процесса.</em></h2></div><p class="section-aside">Выберите среду работы. Маршрут,<br>оборудование и ограничения зависят от неё.</p></div>
+  <div class="cards">
+  {% for slug, title in object_types %}
+    <a class="object-card object-{{ slug }}" href="{% url 'detail' slug %}" aria-label="Открыть объект: {{ title }}">
+      <div class="card-top"><span class="card-count">0{{ forloop.counter }} / 03</span><span class="card-arrow" aria-hidden="true">↗</span></div>
+      <div class="card-middle"><p class="card-label">{% if slug == 'warehouse' %}ПОТОКИ И ХРАНЕНИЕ{% elif slug == 'airport' %}ЗОНЫ И МАРШРУТЫ{% else %}ЭТАЖИ И САНИТАРНЫЕ ПОТОКИ{% endif %}</p><h3>{{ title }}</h3><p class="card-desc">{% if slug == 'warehouse' %}Грузы, проходы, доки и зоны хранения{% elif slug == 'airport' %}Багаж, служебные зоны и правила доступа{% else %}Доставка между этажами, лифты и разделение потоков{% endif %}</p></div>
+      <div class="object-graphic" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
+      <div class="card-bottom"><span>Исследовать объект</span><span aria-hidden="true">→</span></div>
+    </a>
+  {% endfor %}
+  </div>
+</section>
+
+<section class="method" aria-labelledby="method-heading">
+  <div class="method-heading"><p class="eyebrow">02 / ПОРЯДОК РАБОТЫ</p><h2 id="method-heading">От объекта<br>к <em>обоснованию.</em></h2></div>
+  <ol class="method-list"><li><span>01</span><div><h3>Опишите процесс</h3><p>Создайте проект и укажите маршрут, нагрузку и условия работы.</p></div></li><li><span>02</span><div><h3>Выберите оборудование</h3><p>Сравните модели по назначению, характеристикам и условиям поставки.</p></div></li><li><span>03</span><div><h3>Оцените решение</h3><p>Рассчитайте парк по измеренному маршруту и сравните варианты внедрения.</p></div></li></ol>
+</section>
+
+<section class="evidence-band" aria-labelledby="evidence-heading"><span class="evidence-mark" aria-hidden="true">↗</span><div><p class="eyebrow">03 / МАРКЕТ РОБОТОВ</p><h2 id="evidence-heading">Оборудование<br>под вашу задачу.</h2><p>Изучите модели, их назначение, характеристики и условия поставки. В проекте проверьте применимость к вашей операции, затем задайте маршрут для расчёта парка.</p></div><a class="text-action" href="{% url 'catalog_index' %}">Открыть каталог <span aria-hidden="true">→</span></a></section>
+{% endblock %}

@@ -1,0 +1,72 @@
+name: Django checks
+on:
+  pull_request:
+  push:
+    branches: [main, 'feature/**']
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: robot
+          POSTGRES_PASSWORD: test-password
+          POSTGRES_DB: robot_market
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U robot -d robot_market"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      DJANGO_SECRET_KEY: ci-only-automated-checks-secret-at-least-fifty-characters-long
+      DEBUG: '0'
+      DATABASE_URL: postgresql://robot:test-password@localhost:5432/robot_market
+      CATALOG_SOURCE_URL: ${{ secrets.CATALOG_SOURCE_URL }}
+      CATALOG_SOURCE_SHA256: ${{ vars.CATALOG_SOURCE_SHA256 }}
+      CATALOG_SOURCE_PATH: ${{ runner.temp }}/catalog_export_v4.csv
+      RESEARCH_CLAIMS_URL: ${{ secrets.RESEARCH_CLAIMS_URL }}
+      RESEARCH_CLAIMS_SHA256: ${{ vars.RESEARCH_CLAIMS_SHA256 }}
+      RESEARCH_CLAIMS_PATH: ${{ runner.temp }}/verified_claims.json
+      SUPPLEMENT_MANIFEST_URL: ${{ secrets.SUPPLEMENT_MANIFEST_URL }}
+      SUPPLEMENT_MANIFEST_SHA256: ${{ vars.SUPPLEMENT_MANIFEST_SHA256 }}
+      SUPPLEMENT_MANIFEST_PATH: ${{ runner.temp }}/supplement-products.json
+      SUPPLEMENT_ASSET_DIR: ${{ runner.temp }}/supplement-assets
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: ENFORCE_HTTPS=1 python manage.py check --deploy
+      - run: python manage.py makemigrations --check --dry-run
+      - run: python manage.py collectstatic --noinput
+      - name: Obtain verified private catalog
+        run: python -m catalog.bootstrap_source
+      - name: Obtain traced primary-source claims
+        run: python -m catalog.bootstrap_evidence
+      - name: Obtain attested manufacturer supplement and exact source snapshots
+        run: python -m catalog.bootstrap_supplement
+      - run: python manage.py test --verbosity 2
+      - run: python manage.py migrate --noinput
+      - run: python manage.py import_catalog "$CATALOG_SOURCE_PATH" --expected-sha256 "$CATALOG_SOURCE_SHA256"
+      - run: python manage.py import_evidence "$RESEARCH_CLAIMS_PATH" --expected-sha256 "$RESEARCH_CLAIMS_SHA256"
+      - run: python manage.py shell -c "from django.test import Client; assert Client(HTTP_HOST='localhost').get('/ready').status_code == 200"
+      - run: docker build -t robot-market:${{ github.sha }} .
+  deploy:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: preview
+    env:
+      DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+    steps:
+      - name: Publish verified main commit if preview hook is configured
+        if: env.DEPLOY_HOOK != ''
+        run: curl --fail --show-error --silent --max-time 30 --request POST "$DEPLOY_HOOK"
+      - name: Require configured publication
+        if: env.DEPLOY_HOOK == ''
+        run: |
+          echo 'PREVIEW_BLOCKED_BY_ACCESS: no RENDER_DEPLOY_HOOK_URL configured' >&2
+          exit 1

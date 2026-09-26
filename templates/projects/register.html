@@ -1,0 +1,17 @@
+{% extends 'demo/base.html' %}
+{% block title %}Регистрация{% endblock %}
+{% block content %}
+<section class="detail-hero"><p class="eyebrow">ЛИЧНОЕ ПРОСТРАНСТВО</p><h1>Создать учётную запись</h1><p class="lead">Сохраняйте проекты и возвращайтесь к своим расчётам.</p></section>
+<section class="detail-panel account-panel">
+  <form method="post">
+    {% csrf_token %}
+    {% for field in form %}
+      <p><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}{% for error in field.errors %}<span role="alert">{{ error }}</span>{% endfor %}</p>
+    {% endfor %}
+    {% for error in form.non_field_errors %}<p role="alert">{{ error }}</p>{% endfor %}
+    <input type="hidden" name="next" value="{{ next }}">
+    <button class="action-button" type="submit">Создать учётную запись</button>
+  </form>
+  <p>Уже есть учётная запись? <a href="{% url 'login' %}{% if next %}?next={{ next|urlencode }}{% endif %}">Войти</a></p>
+</section>
+{% endblock %}

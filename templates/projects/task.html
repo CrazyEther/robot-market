@@ -1,0 +1,78 @@
+{% extends 'demo/base.html' %}
+{% block title %}Задача и подбор — {{ project.name }}{% endblock %}
+{% block content %}
+<nav class="breadcrumbs" aria-label="Навигация">
+  <a href="{% url 'project_list' %}">Мои проекты</a><span aria-hidden="true">/</span>
+  <a href="{% url 'project_detail' project.id %}?revision={{ revision.number }}">{{ project.name }}</a>
+  <span aria-hidden="true">/</span><span>Задача и подбор</span>
+</nav>
+<section class="detail-hero task-hero">
+  <p class="eyebrow">{{ project.get_object_slug_display }} · РЕВИЗИЯ {{ revision.number }}</p>
+  <h1>Задача и<br>подбор модели<span class="hero-period">.</span></h1>
+  <p class="lead">Опишите операцию и измеряемые условия. Сравните модели по подтверждённым характеристикам, затем задайте маршрут для расчёта парка.</p>
+</section>
+<section class="detail-panel">
+  <p class="eyebrow">01 / ОПЕРАЦИЯ</p><h2>Что должен выполнять робот?</h2>
+  <div class="process-options">
+    {% for item in processes %}<a class="process-option{% if process.code == item.code %} is-selected{% endif %}" href="{% url 'project_task' project.id %}?process={{ item.code|urlencode }}"><span>{{ item.title }}</span><small>{{ item.description }}</small></a>{% endfor %}
+  </div>
+</section>
+{% if historical %}<p class="notice"><span class="notice-indicator" aria-hidden="true">↗</span><span>Вы открыли сохранённую ревизию. <a href="{% url 'project_task' project.id %}">Перейти к текущей задаче</a></span></p>{% endif %}
+{% if form %}
+<section class="detail-panel input-panel">
+  <p class="eyebrow">02 / ПАРАМЕТРЫ</p><h2>{{ process.title }}</h2>
+  <p class="detail-intro">Можно сохранить выбор операции сейчас, а измерения добавить позже. Для каждого введённого значения укажите происхождение; модель проверяется только по известным условиям.</p>
+  <form method="post" novalidate>
+    {% csrf_token %}<input type="hidden" name="process" value="{{ process.code }}"><input type="hidden" name="base_revision" value="{{ base_revision }}">
+    {% if form.non_field_errors %}<div role="alert">{{ form.non_field_errors }}</div>{% endif %}
+    {% for definition, field, source in field_rows %}
+    <div class="task-field">
+      <label for="{{ field.id_for_label }}">{{ definition.label }} <span class="input-unit">{{ definition.unit }}</span></label>{{ field }}
+      {% if field.errors %}<div role="alert">{{ field.errors }}</div>{% endif %}
+      <label for="{{ source.id_for_label }}">Источник измерения</label>{{ source }}
+      {% if source.errors %}<div role="alert">{{ source.errors }}</div>{% endif %}
+    </div>
+    {% endfor %}
+    {% if process.code == 'warehouse_pallet_transfer' %}
+    <div class="task-field">
+      <label for="{{ form.pallet_handoff_mode.id_for_label }}">{{ form.pallet_handoff_mode.label }}</label>{{ form.pallet_handoff_mode }}
+      {% if form.pallet_handoff_mode.errors %}<div role="alert">{{ form.pallet_handoff_mode.errors }}</div>{% endif %}
+      <label for="{{ form.pallet_handoff_mode_source.id_for_label }}">{{ form.pallet_handoff_mode_source.label }}</label>{{ form.pallet_handoff_mode_source }}
+      {% if form.pallet_handoff_mode_source.errors %}<div role="alert">{{ form.pallet_handoff_mode_source.errors }}</div>{% endif %}
+    </div>
+    {% endif %}
+    <label class="task-attestation" for="{{ form.source_attested.id_for_label }}">{{ form.source_attested }} <span>{{ form.source_attested.label }}</span></label>
+    {% if form.source_attested.errors %}<div role="alert">{{ form.source_attested.errors }}</div>{% endif %}
+    <button class="action-button" type="submit">Сохранить и подобрать →</button>
+  </form>
+</section>
+{% endif %}
+{% if robot_selection %}
+<section class="detail-panel chosen-robot">
+  <p class="eyebrow">{% if robot_selection.status == 'fit' %}ВЫБРАНА ДЛЯ ПРОЕКТА{% else %}МОДЕЛЬ НА ПРОВЕРКЕ{% endif %}</p><h2>{{ robot_selection.family_name }}</h2>
+  <p class="detail-intro">{{ robot_selection.company }} · {% if robot_selection.status == 'fit' %}условия задачи подтверждены{% else %}перед расчётом требуется проверить условия применения{% endif %}</p>
+  {% if not historical %}<form method="post" action="{% url 'project_robot_selection' project.id %}">{% csrf_token %}<input type="hidden" name="action" value="remove"><input type="hidden" name="base_revision" value="{{ base_revision }}"><button class="secondary-button" type="submit">Убрать из проекта</button></form>{% endif %}
+</section>
+{% endif %}
+{% if active_process %}
+{% if supplement_update_available %}<section class="detail-panel"><h2>Обновить подбор моделей</h2><p class="detail-intro">Для новой версии проекта доступны опубликованные модели производителей. Сохранённые расчёты прежних версий останутся прежними.</p><form method="post" action="{% url 'project_supplement_refresh' project.id %}">{% csrf_token %}<input type="hidden" name="base_revision" value="{{ base_revision }}"><button class="secondary-button" type="submit">Обновить подбор →</button></form></section>{% endif %}
+<p><a class="api-link" href="{% url 'project_topology' project.id %}?revision={{ revision.number }}">Описать маршрут объекта →</a></p>
+<section class="matching-section">
+  <div class="matching-heading"><div><p class="eyebrow">03 / МОДЕЛИ</p><h2>{{ active_process.title }}</h2></div><p>Проверка по параметрам этой ревизии</p></div>
+  {% for item in matches %}
+  <article class="match-card">
+    <div class="match-top">
+      <div><p class="product-maker">{{ item.company }}</p><h3>{% if item.catalog_card_available %}<a href="{% url 'catalog_family_detail' item.family.id %}?evidence={{ evidence_checksum|urlencode }}">{{ item.name }} <span aria-hidden="true">↗</span></a>{% elif item.source_kind == 'manufacturer_supplement' %}<a href="{{ item.product.product_url }}" target="_blank" rel="noopener noreferrer">{{ item.name }} <span aria-hidden="true">↗</span></a>{% else %}{{ item.name }}{% endif %}</h3></div>
+      <span class="match-status match-status-{{ item.status }}">{% if item.status == 'fit' %}Подходит{% elif item.status == 'reject' %}Не подходит{% else %}Требуется проверка{% endif %}</span>
+    </div>
+    <p class="match-application">Применение: {% for source in item.application_sources %}<a href="{{ source.source_url }}" target="_blank" rel="noopener noreferrer">подтверждение {% if item.application_sources|length > 1 %}{{ forloop.counter }}{% endif %} ↗</a>{% if not forloop.last %} · {% endif %}{% endfor %}</p>
+    <ul class="match-checks">{% for check in item.checks %}<li><span class="match-marker" aria-hidden="true">{% if check.status == 'pass' %}✓{% elif check.status == 'reject' %}×{% else %}?{% endif %}</span><div><strong>{{ check.label }}</strong><p>{{ check.message }}{% if check.source_url %} <a href="{{ check.source_url }}" target="_blank" rel="noopener noreferrer">Характеристика ↗</a>{% endif %}</p></div></li>{% endfor %}</ul>
+    {% if item.is_selected %}<p class="match-selected">Выбрана в этой ревизии</p>{% elif not historical and item.status != 'reject' %}<form class="match-select-form" method="post" action="{% url 'project_robot_selection' project.id %}">{% csrf_token %}<input type="hidden" name="action" value="select"><input type="hidden" name="source_kind" value="{{ item.source_kind }}">{% if item.source_kind == 'manufacturer_supplement' %}<input type="hidden" name="product_ref" value="{{ item.product_ref }}">{% else %}<input type="hidden" name="record_index" value="{{ item.source_row.record_index }}">{% endif %}<input type="hidden" name="base_revision" value="{{ base_revision }}"><button class="action-button" type="submit">{% if item.status == 'fit' %}Выбрать для проекта{% else %}Добавить для проверки{% endif %} →</button></form>{% endif %}
+  </article>
+  {% empty %}
+  <div class="detail-panel"><h3>В каталоге нет моделей с подтверждённым применением для этой операции</h3><p class="detail-intro">Откройте каталог, чтобы просмотреть оборудование других категорий.</p><a class="api-link" href="{% url 'catalog_index' %}">Открыть каталог →</a></div>
+  {% endfor %}
+</section>
+{% endif %}
+<p><a class="back" href="{% url 'project_detail' project.id %}?revision={{ revision.number }}">← К проекту</a></p>
+{% endblock %}

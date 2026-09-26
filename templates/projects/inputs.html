@@ -1,0 +1,20 @@
+{% extends 'demo/base.html' %}
+{% block title %}Параметры — {{ project.name }}{% endblock %}
+{% block content %}
+<nav class="breadcrumbs" aria-label="Навигация"><a href="{% url 'project_detail' project.id %}">{{ project.name }}</a><span aria-hidden="true">/</span><span>Параметры</span></nav>
+<section class="detail-hero"><p class="eyebrow">ВХОДНЫЕ ДАННЫЕ · {{ project.get_object_slug_display }}</p><h1>Параметры объекта</h1><p class="lead">Изменения сохраняются новой ревизией. Предыдущие значения останутся доступны.</p></section>
+<section class="detail-panel input-panel">
+  {% if form.non_field_errors %}<p role="alert">{{ form.non_field_errors }}</p>{% endif %}
+  <form method="post">
+    {% csrf_token %}<input type="hidden" name="base_revision" value="{{ base_revision }}">
+    {% for field, input in rows %}
+    <div class="input-row"><label for="{{ input.id_for_label }}">{{ field.label }}</label><div>{{ input }}<span class="input-unit">{{ field.unit }}</span></div>
+      {% if input.errors %}<p role="alert">{{ input.errors }}</p>{% endif %}
+      <small>{% if field.min is not None %}От {{ field.min }}{% endif %}{% if field.max is not None %} до {{ field.max }}{% endif %} · {{ field.source }} · {% if field.status == 'missing' %}Нет данных{% elif field.status == 'user_input' %}Введено пользователем{% else %}Сообщено источником{% endif %}</small>
+    </div>
+    {% endfor %}
+    <button class="action-button" type="submit">Сохранить новую ревизию</button>
+  </form>
+</section>
+<p><a class="back" href="{% url 'project_detail' project.id %}">← Вернуться к проекту</a></p>
+{% endblock %}

@@ -1,0 +1,16 @@
+.git
+.github
+.env
+.venv
+__pycache__
+*.sqlite3
+source
+*.zip
+*.xlsx
+*.docx
+*.pdf
+.scratch
+.fable
+AGENTS.md
+CLAUDE.md
+T01_WORK_CARD_PRIVATE.md

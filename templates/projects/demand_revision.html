@@ -1,0 +1,17 @@
+{% extends 'demo/base.html' %}
+{% block title %}Сравнить спрос — {{ project.name }}{% endblock %}
+{% block content %}
+<nav class="breadcrumbs" aria-label="Навигация"><a href="{% url 'project_list' %}">Мои проекты</a><span aria-hidden="true">/</span><a href="{% url 'project_detail' project.id %}?revision={{ run.revision.number }}">{{ project.name }}</a><span aria-hidden="true">/</span><span>Сравнить спрос</span></nav>
+<section class="detail-hero"><p class="eyebrow">{{ project.get_object_slug_display }} · РЕВИЗИЯ {{ run.revision.number }}</p><h1>Сравнить спрос<span class="hero-period">.</span></h1><p class="lead">Создайте новый расчёт на основании другого подтверждённого потока заданий за тот же период. Исходный прогон сохранится для сравнения.</p></section>
+{% if error %}<p class="notice" role="alert">{{ error }}</p>{% endif %}
+{% if parent_sizing %}<section class="detail-panel"><p class="eyebrow">ИСХОДНЫЙ ПРОГОН</p><h2>{{ run.operation_log.period_start_at|date:"d.m.Y H:i" }} — {{ run.operation_log.period_end_at|date:"d.m.Y H:i" }}</h2><div class="param-list"><div class="param"><span class="param-name">Пиковый поток</span><strong>{{ parent_sizing.peak_demand }} рейсов/ч</strong></div><div class="param"><span class="param-name">Парк</span><strong>{{ parent_sizing.fleet }}</strong></div><div class="param"><span class="param-name">Передано заданий</span><strong>{{ run.ledger.delivered }}</strong></div></div></section>{% endif %}
+{% if not error %}<section class="detail-panel account-panel"><p class="eyebrow">НОВЫЙ ПОТОК</p><h2>Показатель и журнал заданий</h2><p class="detail-intro">Укажите пиковый поток и его документ, затем загрузите CSV <code>requested_at,work_units</code> с заданиями за указанный выше период. Значение потока не может быть ниже числа заданий в любом часовом интервале журнала. После сохранения рассчитается новый парк; календарь его доступности понадобится для событийного прогона.</p>
+<form method="post" enctype="multipart/form-data">{% csrf_token %}<input type="hidden" name="run" value="{{ run.id }}"><input type="hidden" name="base_revision" value="{{ base_revision }}">{{ form.non_field_errors }}
+<p><label for="{{ form.peak_jobs_per_h.id_for_label }}">{{ form.peak_jobs_per_h.label }}</label>{{ form.peak_jobs_per_h }}{{ form.peak_jobs_per_h.errors }}</p>
+<p><label for="{{ form.peak_source.id_for_label }}">{{ form.peak_source.label }}</label>{{ form.peak_source }}{{ form.peak_source.errors }}</p>
+<p><label for="{{ form.file.id_for_label }}">{{ form.file.label }}</label>{{ form.file }}{{ form.file.errors }}</p>
+<p><label for="{{ form.source_description.id_for_label }}">{{ form.source_description.label }}</label>{{ form.source_description }}{{ form.source_description.errors }}</p>
+<p>{{ form.source_attested }}<label for="{{ form.source_attested.id_for_label }}">{{ form.source_attested.label }}</label>{{ form.source_attested.errors }}</p>
+<button class="action-button" type="submit">Пересчитать парк →</button></form></section>{% endif %}
+<p><a class="back" href="{% url 'project_simulation' project.id %}?revision={{ run.revision.number }}&amp;run={{ run.id }}">← К исходному прогону</a></p>
+{% endblock %}

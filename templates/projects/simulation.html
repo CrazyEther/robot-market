@@ -1,0 +1,53 @@
+{% extends 'demo/base.html' %}
+{% load static %}
+{% block title %}Симуляция — {{ project.name }}{% endblock %}
+{% block content %}
+<nav class="breadcrumbs" aria-label="Навигация"><a href="{% url 'project_list' %}">Мои проекты</a><span aria-hidden="true">/</span><a href="{% url 'project_detail' project.id %}?revision={{ revision.number }}">{{ project.name }}</a><span aria-hidden="true">/</span><span>Симуляция</span></nav>
+<section class="detail-hero"><p class="eyebrow">{{ project.get_object_slug_display }} · РЕВИЗИЯ {{ revision.number }}</p><h1>Симуляция<span class="hero-period">.</span></h1><p class="lead">{{ process.title }}. Воспроизведение фактического потока заданий по измеренному циклу и календарю выбранного парка.</p></section>
+{% if error %}<p class="notice" role="alert">{{ error }}</p>{% endif %}
+{% if historical %}<p class="notice">Сохранённая ревизия. <a href="{% url 'project_simulation' project.id %}">Открыть текущую</a></p>{% endif %}
+{% if not ready %}<section class="detail-panel"><h2>Данные для прогона</h2><p class="detail-intro">Сохраните измеренный транспортный цикл, журнал заданий и календарь роботов для одного периода наблюдения.</p>
+  {% for reason in sizing.reasons %}<p class="detail-intro">{{ reason }}</p>{% endfor %}
+  <a class="api-link" href="{% url 'project_sizing' project.id %}?revision={{ revision.number }}">Расчёт парка →</a> <a class="api-link" href="{% url 'project_operation_log' project.id %}?revision={{ revision.number }}">Журнал заданий →</a> <a class="api-link" href="{% url 'project_availability' project.id %}?revision={{ revision.number }}">Календарь роботов →</a>
+</section>{% endif %}
+{% if ready and not historical %}<section class="detail-panel"><p class="eyebrow">ПРОГОН</p><h2>{{ sizing.fleet }} роботов · {{ log.rows|length }} заданий</h2><p class="detail-intro">Период: {{ log.period_start_at|date:"c" }} — {{ log.period_end_at|date:"c" }}. Передача груза: через {{ sizing.handoff_seconds }} с после начала задания; полный цикл робота: {{ sizing.cycle_seconds }} с.</p>
+  <form method="post">{% csrf_token %}<input type="hidden" name="base_revision" value="{{ base_revision }}"><button class="action-button" type="submit">Рассчитать события →</button></form>
+</section>{% endif %}
+{% if run %}<section class="detail-panel"><p class="eyebrow">СОХРАНЁННЫЙ ПРОГОН</p><h2>{{ run.created_at|date:"d.m.Y H:i:s" }}</h2><div class="param-list">
+  <div class="param"><span class="param-name">Поступило заданий</span><strong>{{ run.ledger.arrivals }}</strong></div>
+  {% if run.ledger.version == 2 %}<div class="param"><span class="param-name">Груз передан</span><strong>{{ run.ledger.delivered }}</strong></div>{% endif %}
+  <div class="param"><span class="param-name">Завершено полных циклов</span><strong>{{ run.ledger.completed }}</strong></div>
+  {% if run.ledger.version == 2 %}<div class="param"><span class="param-name">Объём переданного груза</span><strong>{{ run.ledger.delivered_work_units }} рейсов</strong></div>{% endif %}
+  <div class="param"><span class="param-name">Объём завершённых циклов</span><strong>{{ run.ledger.throughput_work_units }} рейсов</strong></div>
+  <div class="param"><span class="param-name">{% if run.ledger.version == 2 %}Задания без передачи груза{% else %}Задания без завершённого цикла{% endif %} на конец периода</span><strong>{{ run.ledger.unmet_at_end }}</strong></div>
+  <div class="param"><span class="param-name">Максимальная очередь</span><strong>{{ run.ledger.max_queue }}</strong></div>
+  </div><p class="detail-intro">Расчёт закреплён за этой ревизией, исходными файлами журнала и календаря.</p>{% if run.ledger.version == 2 %}<a class="api-link" href="{% url 'project_finance' project.id %}?run={{ run.id }}">Финансовый план →</a>{% endif %}{% if not historical %}<a class="api-link" href="{% url 'project_demand_revision' project.id %}?run={{ run.id }}">Сравнить спрос →</a>{% endif %}</section>
+{% if parent_run and run %}<section class="detail-panel"><p class="eyebrow">СРАВНЕНИЕ СПРОСА</p><h2>Исходный и новый прогон</h2><div class="finance-table-wrap"><table class="finance-table"><thead><tr><th>Показатель</th><th>Исходный</th><th>Новый</th></tr></thead><tbody><tr><th>Пиковый поток, рейсов/ч</th><td>{{ parent_run.input_snapshot.sizing.peak_demand }}</td><td>{{ run.input_snapshot.sizing.peak_demand }}</td></tr><tr><th>Парк</th><td>{{ parent_run.input_snapshot.sizing.fleet }}</td><td>{{ run.input_snapshot.sizing.fleet }}</td></tr><tr><th>Груз передан</th><td>{{ parent_run.ledger.delivered }}</td><td>{{ run.ledger.delivered }}</td></tr><tr><th>Задания без передачи груза</th><td>{{ parent_run.ledger.unmet_at_end }}</td><td>{{ run.ledger.unmet_at_end }}</td></tr><tr><th>Максимальная очередь</th><td>{{ parent_run.ledger.max_queue }}</td><td>{{ run.ledger.max_queue }}</td></tr></tbody></table></div><p><a class="api-link" href="{% url 'project_simulation' project.id %}?revision={{ parent_run.revision.number }}&amp;run={{ parent_run.id }}">Открыть исходный прогон →</a></p></section>{% endif %}
+<section class="detail-panel playback-panel" data-playback>
+  <p class="eyebrow">2D / СОБЫТИЯ</p><h2>Маршрут и состояние парка</h2>
+  <p class="detail-intro">{{ run.input_snapshot.scenario.robot_selection.family_name }} · {{ process.title }}. Схема построена по сохранённым координатам точек и измеренным длинам соединений.</p>
+  {% if scene.floors %}<div class="playback-maps">{% for floor in scene.floors %}
+    <section class="playback-floor"><h3>{{ floor.label }}</h3><svg viewBox="0 0 600 400" role="img" aria-label="Схема точек и соединений: {{ floor.label }}">
+      {% for edge in floor.edges %}<line x1="{{ edge.start.x }}" y1="{{ edge.start.y }}" x2="{{ edge.end.x }}" y2="{{ edge.end.y }}" class="{% if edge.on_route %}playback-route{% else %}playback-connection{% endif %}"><title>{{ edge.start.label }} — {{ edge.end.label }}{% if edge.length_m %} · {{ edge.length_m }} м{% endif %}</title></line>{% endfor %}
+      {% for node in floor.nodes %}<g><circle cx="{{ node.x }}" cy="{{ node.y }}" r="6" class="{% if node.on_route %}playback-route-node{% endif %}"><title>{{ node.label }} · {{ node.source }}</title></circle><text x="{{ node.x }}" y="{{ node.y }}" dx="11" dy="4">{{ node.label }}</text></g>{% endfor %}
+      <g data-robot-layer data-floor="{{ floor.label }}"></g>
+    </svg></section>
+  {% endfor %}</div>{% endif %}
+  {% if scene.transitions %}<div class="playback-transitions"><h3>Переходы между этажами</h3><ul>{% for transition in scene.transitions %}<li>{{ transition.from_label }} ({{ transition.from_floor }}) → {{ transition.to_label }} ({{ transition.to_floor }}) · {{ transition.length_m }} м{% if transition.length_source %} · {{ transition.length_source }}{% endif %}</li>{% endfor %}</ul></div>{% endif %}
+  {% if scene.missing_coordinates %}<p class="detail-intro">Для схемы маршрута добавьте измеренные координаты точек: {{ scene.missing_coordinates|join:", " }}. <a class="api-link" href="{% url 'project_topology' project.id %}">Открыть план →</a></p>{% endif %}
+  {% if playback.motion.reason %}<p class="detail-intro">{{ playback.motion.reason }}</p>{% else %}<p class="detail-intro">Маркеры показывают схематическое положение роботов между измеренными точками. Переход между этажами показан сменой этажа после завершения участка лифта.</p>{% endif %}
+  <div class="playback-controls" aria-label="Управление событиями"><button type="button" data-step-back aria-label="Предыдущее событие">←</button><button type="button" data-toggle-play aria-label="Воспроизвести события">▶</button><button type="button" data-step-next aria-label="Следующее событие">→</button><label for="playback-speed">Скорость времени</label><select id="playback-speed" data-speed><option value="1">1×</option><option value="60" selected>60×</option><option value="600">600×</option></select><label for="playback-position">Событие на странице</label><input id="playback-position" type="range" min="0" max="{{ event_page|length }}" value="0" data-position></div>
+  <p class="playback-current" data-current aria-live="polite">Перед первым событием страницы</p>
+  <div class="playback-stats" aria-label="Состояние прогона">
+    <div><span>Очередь</span><strong data-queued>—</strong></div><div><span>Активных циклов</span><strong data-active>—</strong></div>{% if run.ledger.version == 2 %}<div><span>Груз передан</span><strong data-delivered>—</strong></div>{% endif %}<div><span>Завершено циклов</span><strong data-completed>—</strong></div><div><span>В рабочем состоянии</span><strong data-available>—</strong></div><div><span>На зарядке</span><strong data-charging>—</strong></div><div><span>Обслуживание / простой</span><strong data-inactive>—</strong></div>
+  </div>
+  <p class="detail-intro">Время движения на участке рассчитано из его измеренной длины и сохранённой рабочей скорости. Схема не задаёт траекторию внутри участка и не моделирует встречное движение.</p>
+</section>
+{{ playback|json_script:"playback-data" }}
+<script src="{% static 'projects/playback.js' %}" defer></script>
+<section class="detail-panel"><h2>Шкала событий</h2><p class="detail-intro">Страница {{ page_number }} из {{ page_count }}. Переходы календаря показаны по сохранённому исходному файлу; показатели заданий считаются по журналу прогона.</p><div class="param-list">{% for event in event_page %}<div class="param"><span class="param-name">{{ event.at_s }} с · {% if event.type == "calendar_state" %}Состояние робота{% elif event.type == "period_end" %}Конец периода{% else %}{{ event.type }}{% endif %}</span><strong>{% if event.type == "calendar_state" %}{{ event.robot_id }} · {{ event.state_label }} · строка календаря {{ event.source_row }}{% elif event.type == "period_end" %}Период наблюдения завершён{% else %}Задание из строки {{ event.source_row }}{% if event.robot_id %} · {{ event.robot_id }}{% endif %}{% endif %}</strong></div>{% endfor %}</div>
+{% if previous_page %}<a class="api-link" href="?revision={{ revision.number }}&amp;run={{ run.id }}&amp;page={{ previous_page }}">← Ранее</a>{% endif %}
+{% if next_page %}<a class="api-link" href="?revision={{ revision.number }}&amp;run={{ run.id }}&amp;page={{ next_page }}">Позже →</a>{% endif %}
+</section>{% endif %}
+<p><a class="back" href="{% url 'project_availability' project.id %}?revision={{ revision.number }}">← К календарю роботов</a></p>
+{% endblock %}
