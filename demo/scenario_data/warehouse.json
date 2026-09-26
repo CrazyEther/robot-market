@@ -1,0 +1,73 @@
+{
+  "slug": "warehouse",
+  "title": "Склад",
+  "process": "Перемещение паллеты от ворот приёмки к месту хранения",
+  "unit": "паллетный рейс",
+  "constraint": "Нужны проверенные масса паллеты, ширина каждого проезда и допустимая нагрузка на пол.",
+  "topology": {
+    "nodes": [
+      {
+        "id": "dock",
+        "label": "Ворота приёмки",
+        "kind": "dock"
+      },
+      {
+        "id": "aisle",
+        "label": "Проезд",
+        "kind": "aisle"
+      },
+      {
+        "id": "rack",
+        "label": "Паллетный стеллаж",
+        "kind": "storage"
+      }
+    ],
+    "edges": [
+      {
+        "from": "dock",
+        "to": "aisle",
+        "distance_m": 35,
+        "width_m": 3.2
+      },
+      {
+        "from": "aisle",
+        "to": "rack",
+        "distance_m": 45,
+        "width_m": 2.6
+      }
+    ],
+    "status": "assumption"
+  },
+  "parameters": {
+    "demand": {
+      "value": 60,
+      "unit": "паллетных рейсов/час",
+      "status": "assumption",
+      "source": "Синтетический пример команды проекта"
+    },
+    "pallet_mass": {
+      "value": 650,
+      "unit": "кг",
+      "status": "assumption",
+      "source": "Синтетический пример команды проекта"
+    },
+    "shift_hours": {
+      "value": 8,
+      "unit": "час/смена",
+      "status": "assumption",
+      "source": "Синтетический пример команды проекта"
+    },
+    "robot_payload": {
+      "value": null,
+      "unit": "кг",
+      "status": "missing",
+      "source": "Нет подтверждённой модели оборудования"
+    },
+    "robot_price": {
+      "value": null,
+      "unit": "руб.",
+      "status": "missing",
+      "source": "Нет подтверждённого коммерческого предложения"
+    }
+  }
+}

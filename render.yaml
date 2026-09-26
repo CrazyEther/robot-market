@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: robot-market-preview
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /ready
+    autoDeploy: false
+    envVars:
+      - key: DEBUG
+        value: '0'
+      - key: ENFORCE_HTTPS
+        value: '1'
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: ALLOWED_HOSTS
+        value: .onrender.com
+      - key: DATABASE_URL
+        fromDatabase:
+          name: robot-market-preview-db
+          property: connectionString
+databases:
+  - name: robot-market-preview-db
+    databaseName: robot_market
+    user: robot_market

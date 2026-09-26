@@ -1,0 +1,33 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: robot_market
+      POSTGRES_USER: robot
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-robot-local-only}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U robot -d robot_market"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+  web:
+    build: .
+    environment:
+      DEBUG: "0"
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-local-development-secret-change-before-publication}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1}
+      DATABASE_URL: postgresql://robot:${DB_PASSWORD:-robot-local-only}@db:5432/robot_market
+    ports:
+      - "${WEB_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+volumes:
+  postgres_data:

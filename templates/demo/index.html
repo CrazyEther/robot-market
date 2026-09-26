@@ -1,0 +1,23 @@
+{% extends 'demo/base.html' %}
+{% block title %}Выбор объекта{% endblock %}
+{% block content %}
+<section class="hero">
+  <p class="eyebrow"><span class="eyebrow-line"></span> ПРОЕКТИРОВАНИЕ РОБОТИЗАЦИИ</p>
+  <h1>Начните с вашего<br><span>производственного процесса.</span></h1>
+  <p class="lead">Выберите тип объекта, чтобы открыть отдельный демонстрационный маршрут. Параметры примеров синтетические и предназначены для проверки интерфейса.</p>
+  <div class="hero-meta"><span><span class="meta-dot"></span> Три типа объектов</span><span><span class="meta-dot"></span> Отдельные процессы и ограничения</span><span><span class="meta-dot"></span> Открытые допущения</span></div>
+</section>
+<section class="selection" aria-label="Выбор типа объекта">
+  <div class="section-header"><div><p class="eyebrow">01 / ОБЪЕКТ</p><h2>Где планируется роботизация?</h2></div><p class="section-aside">Выберите один из трёх<br>демонстрационных сценариев</p></div>
+  <div class="cards">
+  {% for scenario in scenarios %}
+  <a class="object-card object-{{ scenario.slug }}" href="{% url 'detail' scenario.slug %}" aria-label="Открыть сценарий: {{ scenario.title }}">
+    <div class="card-top"><span class="card-count">0{{ forloop.counter }}</span><span class="card-icon" aria-hidden="true">{% if scenario.slug == 'warehouse' %}▦{% elif scenario.slug == 'airport' %}✈{% else %}✚{% endif %}</span></div>
+    <div class="card-middle"><p class="card-label">{% if scenario.slug == 'warehouse' %}СКЛАДСКАЯ ЛОГИСТИКА{% elif scenario.slug == 'airport' %}АЭРОПОРТОВАЯ ЛОГИСТИКА{% else %}ВНУТРИБОЛЬНИЧНАЯ ЛОГИСТИКА{% endif %}</p><h3>{{ scenario.title }}</h3><p class="card-desc">{{ scenario.process }}</p></div>
+    <div class="card-bottom"><span>Открыть сценарий</span><span aria-hidden="true">↗</span></div>
+  </a>
+  {% empty %}<p role="alert">Демонстрационные данные ещё не загружены. Выполните команду seed_demo.</p>{% endfor %}
+  </div>
+</section>
+<section class="notice"><span class="notice-indicator">i</span><p><strong>О демонстрации</strong> Это первый рабочий срез: доступен выбор объекта и паспорт процесса. Подбор моделей, экономика и имитация будут добавлены после проверки исходных данных и критериев применимости.</p></section>
+{% endblock %}
