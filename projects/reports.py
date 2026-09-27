@@ -198,6 +198,12 @@ def _pdf(project, run, plan, result, rows, scene, robots, reason, moment, varian
     robot_ref = selection_ref(selected, scenario)
     process = process_for(project.object_slug, scenario["task_profile"]["process"])
     parameters = (scenario.get("workload_profile") or {}).get("parameters") or {}
+    if (process.code in {"airport_baggage_transport", "hospital_meal_delivery"}
+            and scenario["task_profile"].get("version") != 3):
+        story.append(_paragraph(
+            "Исторический расчёт по прежнему паспорту операции. Для нового решения обновите паспорт и выбор модели.",
+            styles["body"],
+        ))
     story.extend([
         _paragraph("Наблюдённая операция", styles["h2"]),
         _paragraph(f"Модель: {selected.get('family_name') or selected.get('record_index') or 'Не указана'}", styles["body"]),
@@ -330,6 +336,7 @@ def build_report_bundle(project, run, plan, result, finance_rows, *, event_index
         "ledger_version": run.ledger_version, "finance_sha256": plan.sha256,
         "finance_parser_version": plan.parser_version,
         "finance_model_version": result["model_version"],
+        "sizing_model_version": run.input_snapshot["sizing"]["version"],
         "operation_source": run.operation_log.source_description,
         "availability_source": run.availability_plan.source_description,
         "finance_source": plan.source_description,

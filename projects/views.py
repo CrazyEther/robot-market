@@ -58,7 +58,8 @@ from projects.selection_refs import (
 )
 from projects.task_profiles import process_for, processes_for
 from projects.topology import empty_topology, floor_drawings, route_result, transport_cycle_route
-from projects.sizing import is_transport, size_project, sizing_fields
+from projects.sizing import (ARCHIVED_SIZING_VERSION, SIZING_VERSION, is_transport,
+                             size_project, sizing_fields)
 
 
 logger = logging.getLogger(__name__)
@@ -1076,6 +1077,8 @@ def project_simulation(request, project_id):
         "previous_page": page_number - 1 if page_number > 1 else None,
         "next_page": page_number + 1 if page_number < page_count else None,
         "historical": revision.pk != latest.pk,
+        "archived_model": bool(run and run.input_snapshot["sizing"]["version"] != SIZING_VERSION),
+        "archived_contract": bool(run and _obsolete_physical_contract(run, project)),
         "base_revision": latest.number, "error": error,
     }, status=status)
 
@@ -1117,8 +1120,17 @@ def _verified_transport_run(run, project):
             or run.availability_plan.parser_version != AVAILABILITY_PARSER_VERSION
             or run.input_snapshot.get("delivery_semantics") != "handoff_after_outbound_and_unloading"):
         raise PlaybackDataError("Исходный прогон расходится с сохранёнными данными.")
-    sizing = size_project(snapshot, manufacturer_speed_limits=_manufacturer_speed_limits(snapshot))
-    if sizing != run.input_snapshot.get("sizing") or sizing.get("status") != "estimated":
+    stored_sizing = run.input_snapshot.get("sizing")
+    if not isinstance(stored_sizing, dict):
+        raise PlaybackDataError("Версия исходного расчёта парка отсутствует.")
+    model_version = stored_sizing.get("version")
+    if model_version not in (ARCHIVED_SIZING_VERSION, SIZING_VERSION) or isinstance(model_version, bool):
+        raise PlaybackDataError("Версия исходного расчёта парка не поддерживается.")
+    sizing = size_project(
+        snapshot, manufacturer_speed_limits=_manufacturer_speed_limits(snapshot),
+        model_version=model_version,
+    )
+    if sizing != stored_sizing or sizing.get("status") != "estimated":
         raise PlaybackDataError("Исходный расчёт парка не воспроизводится.")
     jobs = verified_operation_rows(run.operation_log, process)
     calendar = verified_availability_rows(
@@ -1145,6 +1157,13 @@ def _verified_transport_run(run, project):
     if ledger != run.ledger:
         raise PlaybackDataError("События исходного прогона не воспроизводятся.")
     return process, sizing, jobs, calendar
+
+
+def _obsolete_physical_contract(run, project):
+    task = (run.input_snapshot.get("scenario") or {}).get("task_profile") or {}
+    return (project.object_slug in {"airport", "hospital"}
+            and task.get("process") in {"airport_baggage_transport", "hospital_meal_delivery"}
+            and task.get("version") != 3)
 
 
 @login_required
@@ -1174,6 +1193,9 @@ def project_demand_revision(request, project_id):
         except (PlaybackDataError, DemandRevisionError, OperationLogError, AvailabilityError,
                 EventInputError, KeyError, TypeError, AttributeError, ValueError) as exc:
             error, status = str(exc), 409
+        else:
+            if _obsolete_physical_contract(run, project):
+                error, status = "Для нового сценария обновите паспорт операции и выбор модели.", 409
     if request.method == "POST" and error is None:
         if not form.is_valid():
             status = 400
@@ -1323,6 +1345,11 @@ def project_finance(request, project_id):
             PlaybackDataError, FinanceInputError) as exc:
         error, status = str(exc), 409
 
+    archived_contract = bool(status == 200 and _obsolete_physical_contract(run, project))
+    archived_model = bool(status == 200 and run.input_snapshot["sizing"]["version"] != SIZING_VERSION)
+    if request.method == "POST" and archived_contract:
+        error, status = "Для нового расчёта обновите паспорт операции и выбор модели.", 409
+
     if is_variant_post and error is None:
         if selected_plan is None:
             raise Http404("Финансовый план не найден")
@@ -1447,6 +1474,8 @@ def project_finance(request, project_id):
         "result": result, "month_rows": month_rows,
         "form": form, "variant_form": variant_form, "error": error,
         "variant": selected_variant, "variant_result": variant_result,
+        "archived_contract": archived_contract,
+        "archived_model": archived_model,
         "demand_change": demand_change,
         "parent_finance_plan": parent_finance_plan,
         "parent_finance_result": parent_finance_result,

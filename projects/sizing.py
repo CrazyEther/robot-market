@@ -7,7 +7,8 @@ from projects.topology import route_result, transport_cycle_route
 from projects.selection_refs import selection_ref, workload_matches_selection
 
 
-SIZING_VERSION = 2
+SIZING_VERSION = 3
+ARCHIVED_SIZING_VERSION = 2
 
 COMMON_FIELDS = (
     ("productive_fraction", "Плановая доля времени на задания", "доля 0–1"),
@@ -141,9 +142,11 @@ def manufacturer_speed_issue(observed_speed, claims):
     return None
 
 
-def size_project(snapshot, *, manufacturer_speed_limits=()):
+def size_project(snapshot, *, manufacturer_speed_limits=(), model_version=SIZING_VERSION):
     """Return an estimate only if every exact-revision gate is satisfied."""
-    result = {"version": SIZING_VERSION, "status": "needs_input", "reasons": [],
+    if model_version not in (ARCHIVED_SIZING_VERSION, SIZING_VERSION) or isinstance(model_version, bool):
+        raise ValueError("Версия расчёта парка не поддерживается.")
+    result = {"version": model_version, "status": "needs_input", "reasons": [],
               "active_robots": None, "chargers": None, "reserve_robots": None,
               "fleet": None, "capacity_per_hour": None, "cycle_seconds": None,
               "handoff_seconds": None}
@@ -153,12 +156,14 @@ def size_project(snapshot, *, manufacturer_speed_limits=()):
     if process is None:
         result["reasons"].append("Сохраните операцию объекта.")
         return result
-    if process.code == "airport_baggage_transport" and task.get("version") != 3:
+    if (model_version == SIZING_VERSION and process.code == "airport_baggage_transport"
+            and task.get("version") != 3):
         result["reasons"].append(
             "Обновите паспорт буксировки: масса состава и требуемое тяговое усилие задаются отдельно."
         )
         return result
-    if process.code == "hospital_meal_delivery" and task.get("version") != 3:
+    if (model_version == SIZING_VERSION and process.code == "hospital_meal_delivery"
+            and task.get("version") != 3):
         result["reasons"].append(
             "Обновите паспорт доставки питания: длина и ширина тележки задаются отдельно."
         )

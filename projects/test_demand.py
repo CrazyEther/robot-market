@@ -66,7 +66,7 @@ class DemandJourneyTests(TestCase):
                                for key, (value, unit) in raw_values.items()},
             },
         }
-        sizing = size_project(snapshot)
+        sizing = size_project(snapshot, model_version=2)
         self.assertEqual(sizing["status"], "estimated")
         raw = b"requested_at,work_units\n2026-09-25T08:00:00+00:00,1\n"
         original = OperationLog.objects.create(
@@ -120,12 +120,15 @@ class DemandJourneyTests(TestCase):
                             "availability_sha256": calendar.sha256,
                             "delivery_semantics": "handoff_after_outbound_and_unloading"},
         )
+        self.assertEqual(run.input_snapshot["sizing"]["version"], 2)
         self.client.force_login(owner)
         url = reverse("project_demand_revision", args=[project.id])
         self.assertContains(self.client.get(url, {"run": str(run.id)}), "Сравнить спрос")
         simulation_url = reverse("project_simulation", args=[project.id])
         run_query = {"revision": "1", "run": str(run.id)}
-        self.assertEqual(self.client.get(simulation_url, run_query).status_code, 200)
+        historical_page = self.client.get(simulation_url, run_query)
+        self.assertEqual(historical_page.status_code, 200)
+        self.assertContains(historical_page, "прежней версии расчёта парка")
         SimulationRun.objects.filter(pk=run.pk).update(ledger={"tampered": True})
         self.assertEqual(self.client.get(url, {"run": str(run.id)}).status_code, 409)
         self.assertEqual(self.client.get(simulation_url, run_query).status_code, 409)
@@ -190,6 +193,7 @@ class DemandJourneyTests(TestCase):
         self.assertEqual(compared.status_code, 302)
         new_run = SimulationRun.objects.exclude(pk=run.pk).get()
         self.assertEqual(new_run.revision.number, 3)
+        self.assertEqual(new_run.input_snapshot["sizing"]["version"], 3)
         self.assertNotEqual(new_run.operation_log_id, run.operation_log_id)
         self.assertNotEqual(new_run.availability_plan_id, run.availability_plan_id)
         self.assertEqual(new_run.ledger["arrivals"], 2)
@@ -246,6 +250,7 @@ class DemandJourneyTests(TestCase):
                              "{http://www.w3.org/2000/svg}svg")
             manifest = json.loads(archive.read("manifest.json"))
             self.assertEqual(manifest["run_id"], str(new_run.id))
+            self.assertEqual(manifest["sizing_model_version"], 3)
             self.assertEqual(manifest["finance_plan_id"], str(new_plan.id))
             self.assertEqual(manifest["operation_log_sha256"], new_run.operation_log.sha256)
             self.assertEqual(manifest["frame_at_s"], new_run.ledger["events"][manifest["event_index"]]["at_s"])
