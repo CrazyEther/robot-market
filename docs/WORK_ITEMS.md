@@ -14,7 +14,7 @@
 | T11–T13 | Общая финансовая модель и три объектных применения |
 | [T14](https://github.com/CrazyEther/robot-market/issues/11), [T15](https://github.com/CrazyEther/robot-market/issues/13), [T16](https://github.com/CrazyEther/robot-market/issues/14) | Событийная 2D-симуляция для каждого объекта; склад, аэропорт и медучреждение имеют самостоятельные предметные критерии |
 | [T17](https://github.com/CrazyEther/robot-market/issues/15) | What-if и версии сценариев |
-| T18 | PDF/CSV и кадр моделирования |
+| [T18](https://github.com/CrazyEther/robot-market/issues/16) | PDF/CSV и кадр моделирования |
 | T19 | Администрирование каталога и происхождения данных |
 | T20 | Полная трёхобъектная приёмка и опубликованная демонстрация |
 

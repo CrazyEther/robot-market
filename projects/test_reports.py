@@ -30,3 +30,16 @@ class ReportEncodingTests(SimpleTestCase):
         self.assertNotIn(b"<script>", svg)
         root = ElementTree.fromstring(svg)
         self.assertIn(label, "".join(root.itertext()))
+
+    def test_untrusted_cells_cannot_start_spreadsheet_formulas(self):
+        values = ("=SUM(A1:A2)", "+cmd", "-cmd", "@cmd", "\t=cmd", "\r=cmd", "\n=cmd", "  =cmd")
+        raw = _csv_bytes(("source_ref",), ({"source_ref": value} for value in values))
+        rows = list(csv.DictReader(io.StringIO(raw.decode("utf-8-sig"))))
+        self.assertEqual([row["source_ref"] for row in rows], ["'" + value for value in values])
+
+    def test_amounts_are_finite_and_remain_numeric(self):
+        raw = _csv_bytes(("amount",), ({"amount": "-12.5"},), numeric_columns={"amount"})
+        rows = list(csv.DictReader(io.StringIO(raw.decode("utf-8-sig"))))
+        self.assertEqual(rows[0]["amount"], "-12.5")
+        with self.assertRaises(ValueError):
+            _csv_bytes(("amount",), ({"amount": "Infinity"},), numeric_columns={"amount"})

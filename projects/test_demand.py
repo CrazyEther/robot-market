@@ -1,5 +1,6 @@
 """Demand revision integration: immutable source -> fleet -> events."""
 
+import csv
 import hashlib
 import io
 import json
@@ -246,6 +247,23 @@ class DemandJourneyTests(TestCase):
             self.assertEqual(len(archive.read("events.csv").decode("utf-8-sig").splitlines()),
                              len(new_run.ledger["events"]) + 1)
             self.assertIn("purchase", archive.read("monthly_totals.csv").decode("utf-8-sig"))
+            monthly_rows = list(csv.DictReader(io.StringIO(
+                archive.read("monthly_totals.csv").decode("utf-8-sig"))))
+            event_rows = list(csv.DictReader(io.StringIO(
+                archive.read("events.csv").decode("utf-8-sig"))))
+            finance_rows = list(csv.DictReader(io.StringIO(
+                archive.read("financial_rows.csv").decode("utf-8-sig"))))
+            self.assertEqual(len(monthly_rows), new_plan.horizon_months + 1)
+            self.assertEqual({row["currency"] for row in monthly_rows},
+                             {new_plan.rows[0]["currency"]})
+            self.assertEqual({row["vat_mode"] for row in monthly_rows},
+                             {new_plan.rows[0]["vat_mode"]})
+            self.assertEqual({row["work_unit"] for row in monthly_rows},
+                             {new_run.operation_log.rows[0]["unit"]})
+            self.assertEqual({row["work_unit"] for row in event_rows},
+                             {new_run.operation_log.rows[0]["unit"]})
+            self.assertEqual({row["work_unit"] for row in finance_rows},
+                             {new_run.operation_log.rows[0]["unit"]})
             self.assertEqual(ElementTree.fromstring(archive.read("frame.svg")).tag,
                              "{http://www.w3.org/2000/svg}svg")
             manifest = json.loads(archive.read("manifest.json"))
@@ -253,6 +271,8 @@ class DemandJourneyTests(TestCase):
             self.assertEqual(manifest["sizing_model_version"], 3)
             self.assertEqual(manifest["finance_plan_id"], str(new_plan.id))
             self.assertEqual(manifest["operation_log_sha256"], new_run.operation_log.sha256)
+            self.assertEqual(manifest["currency"], new_plan.rows[0]["currency"])
+            self.assertEqual(manifest["work_unit"], new_run.operation_log.rows[0]["unit"])
             self.assertEqual(manifest["frame_at_s"], new_run.ledger["events"][manifest["event_index"]]["at_s"])
             stable_files = {name: archive.read(name) for name in (
                 "events.csv", "financial_rows.csv", "monthly_totals.csv", "frame.svg", "manifest.json",

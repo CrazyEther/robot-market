@@ -31,8 +31,8 @@ from projects.task_profiles import process_for
 
 FONT_FILE = Path(__file__).resolve().parents[1] / "static" / "fonts" / "DejaVuSans.ttf"
 FONT_NAME = "RobotMarket-DejaVu"
-EVENT_COLUMNS = ("type", "at_s", "source_row", "robot_id", "work_units")
-MONTH_COLUMNS = ("month", "served_work_units", "baseline", "purchase", "raas")
+EVENT_COLUMNS = ("type", "at_s", "source_row", "robot_id", "work_units", "work_unit")
+MONTH_COLUMNS = ("month", "served_work_units", "work_unit", "baseline", "purchase", "raas", "currency", "vat_mode")
 
 
 def safe_csv_cell(value):
@@ -214,7 +214,8 @@ def _pdf(project, run, plan, result, rows, scene, robots, reason, moment, varian
         _paragraph(f"Поступило {run.ledger['arrivals']} · передано {run.ledger['delivered']} · "
                    f"завершено {run.ledger['completed']} · без передачи {run.ledger['unmet_at_end']} · "
                    f"максимальная очередь {run.ledger['max_queue']}", styles["body"]),
-        _paragraph(f"Объём переданного груза: {run.ledger['delivered_work_units']} · "
+        _paragraph(f"Переданный объём: {run.ledger['delivered_work_units']} "
+                   f"{run.operation_log.rows[0]['unit']} · "
                    f"парк по расчёту: {run.input_snapshot['sizing']['fleet']}", styles["body"]),
         _paragraph("Параметры расчёта парка", styles["h2"]),
     ])
@@ -306,12 +307,20 @@ def build_report_bundle(project, run, plan, result, finance_rows, *, event_index
         run.input_snapshot["scenario"], run.input_snapshot["sizing"],
         ledger, scene, event_index,
     )
+    work_units = {row["unit"] for row in run.operation_log.rows}
+    if len(work_units) != 1:
+        raise ValueError("В журнале операции не определена единица объёма.")
+    work_unit = work_units.pop()
+    currency = finance_rows[0]["currency"]
+    vat_mode = finance_rows[0]["vat_mode"]
     monthly = {row["month"]: row["served_work_units"]
                for row in finance_rows if row["scenario"] == "baseline"}
-    detailed_rows = [{**row, "included_scopes": "|".join(row["included_scopes"])}
+    detailed_rows = [{**row, "included_scopes": "|".join(row["included_scopes"]),
+                      "work_unit": work_unit}
                      for row in finance_rows]
     month_rows = [
-        {"month": month, "served_work_units": monthly[month],
+        {"month": month, "served_work_units": monthly[month], "work_unit": work_unit,
+         "currency": currency, "vat_mode": vat_mode,
          **{name: result["scenarios"][name]["monthly_cash_cost"][month]
             for name in SCENARIOS}}
         for month in range(result["horizon_months"] + 1)
@@ -324,6 +333,7 @@ def build_report_bundle(project, run, plan, result, finance_rows, *, event_index
         "variant_id": str(variant.id) if variant else None,
         "variant_checksum": variant.checksum if variant else None,
         "event_index": event_index, "frame_at_s": moment,
+        "work_unit": work_unit, "currency": currency, "vat_mode": vat_mode,
         "catalog_sha256": run.input_snapshot["scenario"].get("catalog_checksum"),
         "evidence_sha256": run.input_snapshot["scenario"].get("evidence_checksum"),
         "robot_selection_ref": robot_ref,
@@ -348,12 +358,13 @@ def build_report_bundle(project, run, plan, result, finance_rows, *, event_index
     }
     files = {
         "report.pdf": _pdf(project, run, plan, result, finance_rows, scene, robots, reason, moment, variant),
-        "events.csv": _csv_bytes(EVENT_COLUMNS, ledger["events"],
+        "events.csv": _csv_bytes(EVENT_COLUMNS,
+                                  [{**event, "work_unit": work_unit} for event in ledger["events"]],
                                   numeric_columns={"at_s", "source_row", "work_units"}),
-        "financial_rows.csv": _csv_bytes(("source_row", *HEADER), detailed_rows,
+        "financial_rows.csv": _csv_bytes(("source_row", *HEADER, "work_unit"), detailed_rows,
                                           numeric_columns={"source_row", "month", "amount", "served_work_units"}),
         "monthly_totals.csv": _csv_bytes(MONTH_COLUMNS, month_rows,
-                                         numeric_columns=set(MONTH_COLUMNS)),
+                                         numeric_columns={"month", "served_work_units", "baseline", "purchase", "raas"}),
         "frame.svg": _svg(scene, robots, reason, moment),
         "manifest.json": json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2).encode("utf-8"),
     }
