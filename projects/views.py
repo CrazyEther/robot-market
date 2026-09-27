@@ -40,7 +40,7 @@ from projects.availability import (
 )
 from projects.finance import (
     FINANCE_VERSION, HEADER as FINANCE_HEADER, FinanceInputError,
-    calculate_finance, derive_finance_variant, finance_metadata_sha256,
+    calculate_finance, compare_finance_plans, derive_finance_variant, finance_metadata_sha256,
     finance_variant_checksum,
     parse_finance_csv, validate_forecast_anchor,
     verified_finance_result, verified_finance_variant,
@@ -1316,6 +1316,15 @@ def project_finance(request, project_id):
         selected_plan = FinancePlan.objects.filter(
             project=project, simulation_run=run,
         ).order_by("-created_at").first()
+    upload_comparison_base = None
+    if request.method == "POST" and not is_variant_post and request.POST.get("compare"):
+        try:
+            compare_id = UUID(request.POST["compare"])
+        except (TypeError, ValueError, AttributeError):
+            raise Http404("Исходный финансовый план не найден")
+        upload_comparison_base = get_object_or_404(
+            FinancePlan, id=compare_id, project=project, simulation_run=run,
+        )
 
     error = None
     status = 200
@@ -1428,6 +1437,7 @@ def project_finance(request, project_id):
                     )
                     return redirect(
                         f"/projects/{project.id}/finance/?run={run.id}&plan={plan.id}"
+                        + (f"&compare={upload_comparison_base.id}" if upload_comparison_base else "")
                     )
     month_rows = []
     if result is not None and selected_plan is not None:
@@ -1439,6 +1449,22 @@ def project_finance(request, project_id):
                 **{scenario: result["scenarios"][scenario]["monthly_cash_cost"][month]
                    for scenario in ("baseline", "purchase", "raas")},
             })
+    comparison_base_plan = None
+    plan_comparison = None
+    plan_compare_error = None
+    compare_text = request.GET.get("compare") if request.method == "GET" else None
+    if compare_text and selected_plan and result:
+        try:
+            compare_id = UUID(compare_text)
+        except (TypeError, ValueError, AttributeError):
+            raise Http404("Исходный финансовый план не найден")
+        comparison_base_plan = get_object_or_404(
+            FinancePlan, id=compare_id, project=project, simulation_run=run,
+        )
+        try:
+            plan_comparison = compare_finance_plans(comparison_base_plan, selected_plan)
+        except FinanceInputError as exc:
+            plan_compare_error = str(exc)
     parent_finance_plan = None
     parent_finance_result = None
     finance_compare_error = None
@@ -1476,10 +1502,17 @@ def project_finance(request, project_id):
         "variant": selected_variant, "variant_result": variant_result,
         "archived_contract": archived_contract,
         "archived_model": archived_model,
+        "can_revise_demand": (run.revision_id == project.revisions.first().id
+                              and not archived_contract and status == 200),
         "demand_change": demand_change,
         "parent_finance_plan": parent_finance_plan,
         "parent_finance_result": parent_finance_result,
         "finance_compare_error": finance_compare_error,
+        "comparison_base_plan": comparison_base_plan,
+        "plan_comparison": plan_comparison,
+        "plan_compare_error": plan_compare_error,
+        "other_plans": FinancePlan.objects.filter(project=project, simulation_run=run)
+        .exclude(pk=selected_plan.pk).order_by("-created_at") if selected_plan else (),
         "variant_source_row": next((row for row in selected_plan.rows
                                     if selected_variant and row["source_row"] == selected_variant.source_row), None)
                                     if selected_plan else None,

@@ -275,6 +275,51 @@ def verified_finance_result(plan):
     return calculated
 
 
+def compare_finance_plans(base, revised):
+    """Compare one sourced cash factor over all affected months of the same run."""
+    before = verified_finance_result(base)
+    after = verified_finance_result(revised)
+    if (base.pk == revised.pk or base.project_id != revised.project_id
+            or base.simulation_run_id != revised.simulation_run_id):
+        raise FinanceInputError("Сравнивайте разные денежные планы одного прогона.")
+    if (base.horizon_months != revised.horizon_months
+            or base.monthly_discount_rate != revised.monthly_discount_rate
+            or base.discount_rate_source != revised.discount_rate_source
+            or base.forecast_basis != revised.forecast_basis):
+        raise FinanceInputError("Для сравнения сохраните один горизонт, ставку и источник прогноза.")
+    key = lambda row: (row["scenario"], row["month"], row["scope"])
+    old_rows = {key(row): row for row in base.rows}
+    new_rows = {key(row): row for row in revised.rows}
+    if old_rows.keys() != new_rows.keys():
+        raise FinanceInputError("Набор сценариев, месяцев и статей в сравниваемых планах различается.")
+    changes = []
+    for row_key, old in old_rows.items():
+        new = new_rows[row_key]
+        fixed = set(old) - {"source_row", "amount", "source_date", "source_ref"}
+        if any(old[field] != new[field] for field in fixed):
+            raise FinanceInputError("В сравниваемых планах изменены валюта, НДС, объём или условия статьи.")
+        if Decimal(old["amount"]) == Decimal(new["amount"]):
+            if old["source_date"] != new["source_date"] or old["source_ref"] != new["source_ref"]:
+                raise FinanceInputError("Источник неизменённой суммы должен остаться прежним.")
+            continue
+        if (old["source_date"], old["source_ref"]) == (new["source_date"], new["source_ref"]):
+            raise FinanceInputError("Изменённой сумме нужен новый документ или дата источника.")
+        changes.append({
+            "scenario": row_key[0], "month": row_key[1], "scope": row_key[2],
+            "base_source_row": old["source_row"], "revised_source_row": new["source_row"],
+            "base_amount": old["amount"], "revised_amount": new["amount"],
+            "currency": new["currency"], "source_date": new["source_date"],
+            "source_ref": new["source_ref"],
+        })
+    if not changes:
+        raise FinanceInputError("Суммы в сравниваемых планах не изменились.")
+    if len({(item["scenario"], item["scope"]) for item in changes}) != 1:
+        raise FinanceInputError("Для одного сравнения изменяйте только одну статью одного сценария.")
+    return {"changes": sorted(changes, key=lambda item: item["month"]),
+            "scenario": changes[0]["scenario"], "scope": changes[0]["scope"],
+            "before": before, "after": after}
+
+
 def derive_finance_variant(plan, *, source_row, amount, source_date, source_ref):
     """Recalculate one sourced cash line without mutating the imported plan."""
     verified_finance_result(plan)

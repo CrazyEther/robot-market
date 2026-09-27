@@ -316,9 +316,79 @@ class FinanceSourceJourneyTests(TestCase):
         self.assertEqual(Decimal(plan.result["scenarios"]["purchase"]["tco"]), Decimal("3200"))
         self.assertEqual(bytes(plan.raw_csv), raw_plan)
         self.assertEqual(self.client.post(url, variant_input)["Location"], variant_response["Location"])
+        revised_rows = _contract_rows()
+        equipment = next(row for row in revised_rows
+                         if row["scenario"] == "purchase" and row["scope"] == "robot_equipment")
+        equipment["amount"] = variant_input["amount"]
+        equipment["source_date"] = variant_input["source_date"]
+        equipment["source_ref"] = variant_input["source_ref"]
+        revised_raw = _csv(revised_rows)
+        revised_upload = self.client.post(url, {
+            "run": str(run.id), "compare": str(plan.id),
+            "file": SimpleUploadedFile("cashflows-revised.csv", revised_raw),
+            "horizon_months": "60", "monthly_discount_rate": "0",
+            "discount_rate_source": "test-only rate source",
+            "source_description": "test-only revised equipment source",
+            "forecast_basis": "test-only volume oracle", "source_attested": "on",
+        })
+        self.assertEqual(revised_upload.status_code, 302)
+        comparison_page = self.client.get(revised_upload["Location"])
+        self.assertContains(comparison_page, "Исходный и изменённый денежный план")
+        self.assertContains(comparison_page, "Цена оборудования")
+        self.assertContains(comparison_page, variant_input["source_ref"])
+        compared = comparison_page.context["plan_comparison"]
+        self.assertEqual((compared["scenario"], compared["scope"]),
+                         ("purchase", "robot_equipment"))
+        self.assertEqual(len(compared["changes"]), 1)
+        self.assertEqual(compared["before"]["scenarios"]["purchase"]["tco"], "3200")
+        self.assertEqual(compared["after"]["scenarios"]["purchase"]["tco"], "4200")
+        recurring_rows = _contract_rows()
+        recurring_amount = next(row["amount"] for row in recurring_rows
+                                if row["scenario"] == "raas" and row["month"] == "1")
+        for row in recurring_rows:
+            if row["scenario"] == "purchase" and row["scope"] == "operations":
+                row["amount"] = recurring_amount
+                row["source_ref"] = variant_input["source_ref"]
+        recurring_upload = self.client.post(url, {
+            "run": str(run.id), "compare": str(plan.id),
+            "file": SimpleUploadedFile("cashflows-recurring.csv", _csv(recurring_rows)),
+            "horizon_months": "60", "monthly_discount_rate": "0",
+            "discount_rate_source": "test-only rate source",
+            "source_description": "test-only revised recurring source",
+            "forecast_basis": "test-only volume oracle", "source_attested": "on",
+        })
+        self.assertEqual(recurring_upload.status_code, 302)
+        recurring_page = self.client.get(recurring_upload["Location"])
+        self.assertEqual(recurring_page.context["plan_comparison"]["scope"], "operations")
+        self.assertEqual(len(recurring_page.context["plan_comparison"]["changes"]),
+                         plan.horizon_months)
+        mixed_rows = deepcopy(recurring_rows)
+        mixed_equipment = next(row for row in mixed_rows
+                               if row["scenario"] == "purchase" and row["scope"] == "robot_equipment")
+        mixed_equipment["amount"] = variant_input["amount"]
+        mixed_equipment["source_ref"] = variant_input["source_ref"]
+        mixed_upload = self.client.post(url, {
+            "run": str(run.id), "compare": str(plan.id),
+            "file": SimpleUploadedFile("cashflows-mixed.csv", _csv(mixed_rows)),
+            "horizon_months": "60", "monthly_discount_rate": "0",
+            "discount_rate_source": "test-only rate source",
+            "source_description": "test-only mixed source",
+            "forecast_basis": "test-only volume oracle", "source_attested": "on",
+        })
+        self.assertEqual(mixed_upload.status_code, 302)
+        mixed_page = self.client.get(mixed_upload["Location"])
+        self.assertContains(mixed_page, "изменяйте только одну статью")
+        self.assertIsNone(mixed_page.context["plan_comparison"])
+        same_plan = self.client.get(url, {
+            "run": str(run.id), "plan": str(plan.id), "compare": str(plan.id),
+        })
+        self.assertContains(same_plan, "Сравнивайте разные денежные планы одного прогона")
+        self.assertIsNone(same_plan.context["plan_comparison"])
+        self.assertEqual(bytes(plan.raw_csv), raw_plan)
         other = get_user_model().objects.create_user(username="finance-variant-other")
         self.client.force_login(other)
         self.assertEqual(self.client.get(variant_response["Location"]).status_code, 404)
+        self.assertEqual(self.client.get(revised_upload["Location"]).status_code, 404)
         self.assertEqual(self.client.get(source_url).status_code, 404)
         self.client.force_login(owner)
         FinanceVariant.objects.filter(pk=variant.pk).update(result={"tampered": True})
