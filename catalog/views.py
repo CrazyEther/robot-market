@@ -399,6 +399,10 @@ def source_management(request):
                 publication_error, status = "Версия связана с каталогом, не утверждённым для этого окружения.", 409
             elif candidate.raw_source is None or candidate.catalog_batch.raw_source is None:
                 publication_error, status = "Для публикации нужны архивированные исходные байты обоих источников.", 409
+            elif (hashlib.sha256(bytes(candidate.raw_source)).hexdigest() != candidate.checksum
+                  or hashlib.sha256(bytes(candidate.catalog_batch.raw_source)).hexdigest()
+                  != candidate.catalog_batch.checksum):
+                publication_error, status = "Архивированные источники не прошли проверку целостности.", 409
             else:
                 try:
                     with transaction.atomic():

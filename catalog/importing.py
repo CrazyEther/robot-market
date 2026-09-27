@@ -118,6 +118,8 @@ def import_catalog(content, *, source_label, source_kind, expected_checksum=None
                 CatalogBatch.objects.filter(pk=existing.pk, raw_source__isnull=True).update(
                     raw_source=content,
                 )
+            elif bytes(existing.raw_source) != content:
+                raise CatalogImportError("Архивированный каталог не совпадает с сохранённой контрольной суммой")
             return existing, False
         batch = CatalogBatch.objects.create(
             checksum=checksum, source_label=source_label,

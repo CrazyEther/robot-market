@@ -135,6 +135,35 @@ class CatalogAdministrationTests(TestCase):
         self.assertEqual(CatalogEvidenceBatch.objects.count(), 0)
         self.assertEqual(CatalogImportEvent.objects.count(), 0)
 
+    def test_corrupted_archived_bytes_cannot_be_reimported_or_published(self):
+        self.client.force_login(self.admin)
+        CatalogBatch.objects.filter(pk=self.catalog_batch.pk).update(raw_source=b"corrupt")
+        self.assertEqual(self._upload(
+            "catalog", self.catalog_bytes, self.catalog_name,
+        ).status_code, 400)
+        self.assertEqual(CatalogImportEvent.objects.count(), 0)
+        CatalogBatch.objects.filter(pk=self.catalog_batch.pk).update(raw_source=self.catalog_bytes)
+
+        self.assertEqual(self._upload(
+            "evidence", self.evidence_bytes, self.evidence_name,
+        ).status_code, 302)
+        batch = CatalogEvidenceBatch.objects.get()
+        CatalogEvidenceBatch.objects.filter(pk=batch.pk).update(raw_source=b"corrupt")
+        self.assertEqual(self._upload(
+            "evidence", self.evidence_bytes, self.evidence_name,
+        ).status_code, 400)
+        self.assertEqual(CatalogImportEvent.objects.count(), 1)
+        publish = {"action": "publish", "checksum": batch.checksum,
+                   "reason": "Проверка целостности архивированных сведений"}
+        self.assertEqual(self.client.post(reverse("catalog_source_management"), publish).status_code, 409)
+        self.assertFalse(CatalogPublication.objects.exists())
+        self.assertFalse(CatalogPublicationEvent.objects.exists())
+
+        CatalogEvidenceBatch.objects.filter(pk=batch.pk).update(raw_source=self.evidence_bytes)
+        CatalogBatch.objects.filter(pk=self.catalog_batch.pk).update(raw_source=b"corrupt")
+        self.assertEqual(self.client.post(reverse("catalog_source_management"), publish).status_code, 409)
+        self.assertFalse(CatalogPublication.objects.exists())
+
     def test_django_admin_cannot_edit_or_delete_history(self):
         self.client.force_login(self.admin)
         self.assertEqual(self._upload(

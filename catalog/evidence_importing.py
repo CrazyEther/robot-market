@@ -196,6 +196,8 @@ def import_evidence(content, *, source_label, expected_checksum, publish_initial
                 CatalogEvidenceBatch.objects.filter(
                     pk=existing.pk, raw_source__isnull=True,
                 ).update(raw_source=content)
+            elif bytes(existing.raw_source) != content:
+                raise EvidenceImportError("Архивированный реестр не совпадает с сохранённой контрольной суммой")
             if publish_initial:
                 CatalogPublication.objects.get_or_create(
                     pk="storefront", defaults={"evidence_batch": existing},
