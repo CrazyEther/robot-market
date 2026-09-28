@@ -16,6 +16,6 @@
 | [T17](https://github.com/CrazyEther/robot-market/issues/15) | What-if и версии сценариев |
 | [T18](https://github.com/CrazyEther/robot-market/issues/16) | PDF/CSV и кадр моделирования |
 | [T19](https://github.com/CrazyEther/robot-market/issues/17) | Администрирование каталога и происхождения данных |
-| T20 | Полная трёхобъектная приёмка и опубликованная демонстрация |
+| [T20](https://github.com/CrazyEther/robot-market/issues/18) | Полная трёхобъектная приёмка и опубликованный предпросмотр |
 
 Для T01: `docker compose up --build -d` должен поднимать Django и PostgreSQL с проверенным каталогом v4, предоставленным отдельно от Git. `python manage.py test` проверяет API, русские страницы и отказ `/ready` без каталога. Для T00: каждый параметр должен иметь единицу, происхождение и статус, а закрытые исходные файлы не должны попасть в публичный репозиторий.
