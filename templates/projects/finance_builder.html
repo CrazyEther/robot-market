@@ -1,0 +1,12 @@
+{% extends 'demo/base.html' %}
+{% block title %}Рассчитать экономику — {{ project.name }}{% endblock %}
+{% block content %}
+<nav class="breadcrumbs" aria-label="Навигация"><a href="{% url 'project_detail' project.id %}">{{ project.name }}</a><span>/</span><a href="{% url 'project_simulation' project.id %}?run={{ run.id }}&amp;revision={{ run.revision.number }}">Симуляция</a><span>/</span><span>Экономика</span></nav>
+<section class="detail-hero"><p class="eyebrow">{{ project.get_object_slug_display }}</p><h1>Экономика роботизации</h1><p class="lead">Сравните действующий процесс, покупку и RaaS на одном выполненном объёме.</p></section>
+{% if error %}<p class="notice" role="alert">{{ error }}</p>{% else %}
+<section class="detail-panel"><h2>{{ sizing.fleet }} роботов · {{ run.ledger.delivered_work_units }} выполненных рейсов</h2><p>Период прогона: {{ run.operation_log.period_start_at|date:'c' }} — {{ run.operation_log.period_end_at|date:'c' }}. Невыполненные задания не включаются в оплачиваемый объём.</p><p>Прогноз повторяет этот период по указанному вами календарю. Это план при сохранении нагрузки, маршрута и доступности, а не гарантия будущего результата.</p></section>
+<section class="detail-panel account-panel"><h2>Коммерческие условия</h2><p>Все денежные поля обязательны: укажите 0, если расход подтверждённо отсутствует. Постоянные затраты включают сохраняющийся персонал, обслуживание и прочие расходы; переменные — энергию, расходники и оплату выполненных рейсов. Не учитывайте одну статью дважды.</p><p>План использует постоянные номинальные цены без индексации. Оборотный капитал возвращается в последнем месяце. Для сезонности, налоговых потоков, остаточной стоимости или изменения цен используйте <a href="{% url 'project_finance' project.id %}?run={{ run.id }}">подробный помесячный план</a>.</p>
+<form method="post">{% csrf_token %}<input type="hidden" name="run" value="{{ run.id }}">{{ form.non_field_errors }}
+{% for title, fields in form.sections %}<fieldset><legend>{{ title }}</legend>{% for field in fields %}<p><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% for message in field.errors %}<span role="alert">{{ message }}</span>{% endfor %}</p>{% endfor %}</fieldset>{% endfor %}
+<button class="action-button" type="submit">Рассчитать и сохранить сравнение →</button></form></section>{% endif %}
+{% endblock %}

@@ -241,7 +241,7 @@ class DemandJourneyTests(TestCase):
         with ZipFile(io.BytesIO(bundle.content)) as archive:
             self.assertEqual(set(archive.namelist()), {
                 "report.pdf", "events.csv", "financial_rows.csv",
-                "monthly_totals.csv", "frame.svg", "manifest.json",
+                "monthly_totals.csv", "frame.svg", "manifest.json", "simulation_metrics.csv",
             })
             self.assertTrue(archive.read("report.pdf").startswith(b"%PDF-"))
             self.assertEqual(len(archive.read("events.csv").decode("utf-8-sig").splitlines()),
@@ -268,6 +268,10 @@ class DemandJourneyTests(TestCase):
                              "{http://www.w3.org/2000/svg}svg")
             manifest = json.loads(archive.read("manifest.json"))
             self.assertEqual(manifest["run_id"], str(new_run.id))
+            self.assertEqual(manifest["simulation_metrics"]["throughput"]["delivered_work_units"],
+                             new_run.ledger["delivered_work_units"])
+            self.assertIn("waiting.started_jobs_mean_seconds",
+                          archive.read("simulation_metrics.csv").decode("utf-8-sig"))
             self.assertEqual(manifest["sizing_model_version"], 3)
             self.assertEqual(manifest["finance_plan_id"], str(new_plan.id))
             self.assertEqual(manifest["operation_log_sha256"], new_run.operation_log.sha256)
@@ -275,7 +279,7 @@ class DemandJourneyTests(TestCase):
             self.assertEqual(manifest["work_unit"], new_run.operation_log.rows[0]["unit"])
             self.assertEqual(manifest["frame_at_s"], new_run.ledger["events"][manifest["event_index"]]["at_s"])
             stable_files = {name: archive.read(name) for name in (
-                "events.csv", "financial_rows.csv", "monthly_totals.csv", "frame.svg", "manifest.json",
+                "events.csv", "financial_rows.csv", "monthly_totals.csv", "frame.svg", "manifest.json", "simulation_metrics.csv",
             )}
         reopened = self.client.get(report_url, report_query)
         self.assertEqual(reopened.status_code, 200)

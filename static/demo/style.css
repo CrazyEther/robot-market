@@ -361,3 +361,10 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,te
 .playback-floor circle.playback-robot{fill:#fff;stroke:#111813;stroke-width:3}.playback-floor text.playback-robot-label{fill:#fff;font-size:13px;font-weight:800}
 @media(max-width:650px){.playback-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.playback-controls label{width:100%;margin-left:0}}
 .finance-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:22px 0}.finance-grid>div{min-width:0;padding:18px;background:#111b14;border:1px solid var(--line)}.finance-grid h3{margin:0 0 14px;font-size:16px}.finance-grid p{margin:8px 0;color:#d7e6d2}.finance-grid strong{color:#f0f5eb}.finance-table-wrap{overflow-x:auto;margin-top:14px}.finance-table{width:100%;border-collapse:collapse;min-width:650px;text-align:right}.finance-table th,.finance-table td{padding:9px 12px;border-bottom:1px solid var(--line);white-space:nowrap}.finance-table th:first-child,.finance-table td:first-child{text-align:left}.finance-table th{color:var(--acid);font-size:12px}.account-panel textarea{width:100%;background:#121a15;color:#f0f5eb;border:1px solid var(--line);padding:11px;font:inherit}@media(max-width:800px){.finance-grid{grid-template-columns:1fr}}
+/* Measured route bends use SVG polylines; preserve existing route emphasis. */
+.topology-canvas polyline { stroke: #617a66; stroke-width: 2; fill: none; }
+.topology-canvas polyline.on-route { stroke: var(--acid); stroke-width: 4; }
+.playback-floor polyline { stroke: #617a66; stroke-width: 2; fill: none; }
+.playback-floor polyline.playback-route { stroke: #a8c889; stroke-width: 3; }
+.playback-panel.has-active-route polyline.playback-route { stroke: var(--acid); stroke-width: 5; }
+.topology-form textarea { width: 100%; max-width: 100%; background: #121a15; color: #f0f5eb; border: 1px solid var(--line); padding: 11px; font: inherit; }

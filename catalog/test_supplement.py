@@ -395,7 +395,7 @@ class SupplementProjectSelectionTests(TestCase):
         self.assertContains(response, self.product.model)
         self.assertContains(response, self.product.product_url)
         self.assertContains(response, "Стоимость по запросу")
-        self.assertContains(response, "Создать проект")
+        self.assertContains(response, "Проверить модель в проекте")
         self.assertNotContains(response, self.supplement.checksum)
         self.assertNotContains(response, "supplement_products")
         self.assertEqual(self.client.get(reverse("catalog_supplement_detail", args=[

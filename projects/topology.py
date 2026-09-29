@@ -150,6 +150,15 @@ def transport_cycle_route(topology, outbound=None):
 
 def floor_drawings(topology, route):
     """Scale only user-supplied coordinates into SVG; preserve separate floors."""
+    from projects.floor_plans import project_on_plan
+    from projects.path_geometry import validate_waypoints
+
+    for edge in topology["edges"]:
+        if "waypoints_m" in edge or "geometry_source" in edge:
+            validate_waypoints(topology, edge["start"], edge["end"],
+                               edge.get("waypoints_m"), edge.get("geometry_source"),
+                               edge.get("length_m"))
+
     route_edges = set(route["edges"])
     drawings = []
     floors = sorted({node["floor"] for node in topology["nodes"] if node.get("floor")})
@@ -158,21 +167,48 @@ def floor_drawings(topology, route):
                     and node.get("y_m") is not None and node["floor"] == floor]
         if not measured:
             continue
-        xs = [Decimal(node["x_m"]) for node in measured]
-        ys = [Decimal(node["y_m"]) for node in measured]
-        min_x, max_x, min_y, max_y = min(xs), max(xs), min(ys), max(ys)
-        span = max(max_x - min_x, max_y - min_y, Decimal(1))
-        positioned = {}
-        for node in measured:
-            positioned[node["id"]] = {
-                "id": node["id"], "label": node["label"],
-                "x": format(40 + (Decimal(node["x_m"]) - min_x) * 520 / span, ".2f"),
-                "y": format(360 - (Decimal(node["y_m"]) - min_y) * 320 / span, ".2f"),
-            }
+        allowed = {node["id"] for node in measured}
+        waypoint_ids = {}
+        extra = []
+        for edge in topology["edges"]:
+            if edge["start"] not in allowed or edge["end"] not in allowed:
+                continue
+            waypoint_ids[edge["id"]] = []
+            for index, point in enumerate(edge.get("waypoints_m") or []):
+                identifier = f'__path__:{edge["id"]}:{index}'
+                waypoint_ids[edge["id"]].append(identifier)
+                extra.append({"id": identifier, "label": "", "floor": floor,
+                              "x_m": point["x_m"], "y_m": point["y_m"]})
+        all_measured = measured + extra
+        plan = (topology.get("floor_plans") or {}).get(floor)
+        projection = project_on_plan(topology, floor, plan, all_measured) if isinstance(plan, dict) else None
+        if projection is not None:
+            positioned, image = projection
+        else:
+            xs = [Decimal(node["x_m"]) for node in all_measured]
+            ys = [Decimal(node["y_m"]) for node in all_measured]
+            min_x, max_x, min_y, max_y = min(xs), max(xs), min(ys), max(ys)
+            scale = min(Decimal(520) / max(max_x - min_x, Decimal(1)),
+                        Decimal(320) / max(max_y - min_y, Decimal(1)))
+            center_x, center_y = (min_x + max_x) / 2, (min_y + max_y) / 2
+            positioned = {}
+            image = None
+            for node in all_measured:
+                positioned[node["id"]] = {
+                    "id": node["id"], "label": node["label"],
+                    "x": format(Decimal(300) + (Decimal(node["x_m"]) - center_x) * scale, ".2f"),
+                    "y": format(Decimal(200) - (Decimal(node["y_m"]) - center_y) * scale, ".2f"),
+                }
         lines = []
         for edge in topology["edges"]:
             if edge["start"] in positioned and edge["end"] in positioned:
+                path = ([positioned[edge["start"]]] +
+                        [positioned[key] for key in waypoint_ids.get(edge["id"], [])] +
+                        [positioned[edge["end"]]])
                 lines.append({"id": edge["id"], "start": positioned[edge["start"]],
-                              "end": positioned[edge["end"]], "on_route": edge["id"] in route_edges})
-        drawings.append({"floor": floor, "nodes": list(positioned.values()), "edges": lines})
+                              "end": positioned[edge["end"]], "on_route": edge["id"] in route_edges,
+                              "path": path,
+                              "svg_points": " ".join(f'{pt["x"]},{pt["y"]}' for pt in path)})
+        drawings.append({"floor": floor, "nodes": [positioned[node["id"]] for node in measured],
+                         "edges": lines, "plan": image})
     return drawings

@@ -230,9 +230,18 @@ class CatalogAdministrationTests(TestCase):
         })
         self.assertEqual(published.status_code, 302)
         self.assertEqual(current_source_pair()[1].checksum, next_checksum)
-        self.assertEqual(self.client.get(reverse("catalog_index"), {
+        archived_index = self.client.get(reverse("catalog_index"), {
             "batch": self.catalog_batch.checksum, "evidence": old_batch.checksum,
-        }).status_code, 200)
+        })
+        self.assertEqual(archived_index.status_code, 200)
+        self.assertContains(
+            archived_index,
+            f"?batch={self.catalog_batch.checksum}&amp;evidence={old_batch.checksum}",
+        )
+        archived_detail = self.client.get(reverse("catalog_family_detail", args=[family.pk]), {
+            "batch": self.catalog_batch.checksum, "evidence": old_batch.checksum,
+        })
+        self.assertEqual(archived_detail.status_code, 200)
         self.client.force_login(self.user)
         self.assertEqual(self.client.post(publish_url, {
             "action": "publish", "checksum": old_batch.checksum,

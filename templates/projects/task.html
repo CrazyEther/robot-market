@@ -11,6 +11,7 @@
   <h1>Задача и<br>подбор модели<span class="hero-period">.</span></h1>
   <p class="lead">Опишите операцию и измеряемые условия. Сравните модели по подтверждённым характеристикам, затем задайте маршрут для расчёта парка.</p>
 </section>
+{% if catalog_intent %}<p class="notice" role="status">Проверяемая модель из каталога: <strong>{{ catalog_intent.name }}</strong> · {{ catalog_intent.process.title }}. Результат подбора по-прежнему зависит от введённых условий.</p>{% endif %}
 <section class="detail-panel">
   <p class="eyebrow">01 / ОПЕРАЦИЯ</p><h2>Что должен выполнять робот?</h2>
   <div class="process-options">
@@ -23,7 +24,7 @@
   <p class="eyebrow">02 / ПАРАМЕТРЫ</p><h2>{{ process.title }}</h2>
   <p class="detail-intro">Можно сохранить выбор операции сейчас, а измерения добавить позже. Для каждого введённого значения укажите происхождение; модель проверяется только по известным условиям.</p>
   <form method="post" novalidate>
-    {% csrf_token %}<input type="hidden" name="process" value="{{ process.code }}"><input type="hidden" name="base_revision" value="{{ base_revision }}">
+    {% csrf_token %}<input type="hidden" name="process" value="{{ process.code }}"><input type="hidden" name="base_revision" value="{{ base_revision }}">{% if catalog_intent %}<input type="hidden" name="catalog_model" value="{{ catalog_intent.token }}">{% endif %}
     {% if form.non_field_errors %}<div role="alert">{{ form.non_field_errors }}</div>{% endif %}
     {% for definition, field, source in field_rows %}
     <div class="task-field">
@@ -62,7 +63,7 @@
   {% for item in matches %}
   <article class="match-card">
     <div class="match-top">
-      <div><p class="product-maker">{{ item.company }}</p><h3>{% if item.catalog_card_available %}<a href="{% url 'catalog_family_detail' item.family.id %}?evidence={{ evidence_checksum|urlencode }}">{{ item.name }} <span aria-hidden="true">↗</span></a>{% elif item.source_kind == 'manufacturer_supplement' %}<a href="{{ item.product.product_url }}" target="_blank" rel="noopener noreferrer">{{ item.name }} <span aria-hidden="true">↗</span></a>{% else %}{{ item.name }}{% endif %}</h3></div>
+      <div><p class="product-maker">{{ item.company }}</p><h3>{% if item.catalog_card_available %}<a href="{% url 'catalog_family_detail' item.family.id %}?evidence={{ evidence_checksum|urlencode }}">{{ item.name }} <span aria-hidden="true">↗</span></a>{% elif item.source_kind == 'manufacturer_supplement' %}<a href="{{ item.product.product_url }}" target="_blank" rel="noopener noreferrer">{{ item.name }} <span aria-hidden="true">↗</span></a>{% else %}{{ item.name }}{% endif %}</h3>{% if item.is_hinted %}<p class="match-application">Модель из карточки каталога · проверьте применимость по условиям объекта</p>{% endif %}</div>
       <span class="match-status match-status-{{ item.status }}">{% if item.status == 'fit' %}Подходит{% elif item.status == 'reject' %}Не подходит{% else %}Требуется проверка{% endif %}</span>
     </div>
     <p class="match-application">Применение: {% for source in item.application_sources %}<a href="{{ source.source_url }}" target="_blank" rel="noopener noreferrer">подтверждение {% if item.application_sources|length > 1 %}{{ forloop.counter }}{% endif %} ↗</a>{% if not forloop.last %} · {% endif %}{% endfor %}</p>

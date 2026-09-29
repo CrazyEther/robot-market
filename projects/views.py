@@ -3,12 +3,14 @@ import hashlib
 import logging
 from decimal import Decimal, InvalidOperation
 from time import time
+from urllib.parse import urlencode
 from uuid import UUID, uuid4
 
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST, require_http_methods
 
@@ -23,12 +25,16 @@ from projects.forms import (
     OperationLogUploadForm, AvailabilityUploadForm, FinancePlanUploadForm, FinanceVariantForm,
     DemandRevisionForm,
     TopologyNodeForm, TopologyEdgeForm, TopologyRouteForm,
+    FloorPlanUploadForm, FloorPlanCalibrationForm,
 )
 from projects.input_profiles import (
     SHEETS, ProfileValidationError, normalize_value, parse_upload,
     profile_for_revision,
 )
-from projects.models import AvailabilityPlan, FinancePlan, FinanceVariant, OperationLog, Project, ProjectRevision, SimulationRun
+from projects.models import (AvailabilityPlan, FinancePlan, FinanceVariant, FloorPlanSource,
+                             OperationLog, Project, ProjectRevision, SimulationRun)
+from projects.floor_plans import FloorPlanError, calibration_for, sanitize_floor_plan
+from projects.path_geometry import RouteGeometryError
 from projects.playback import (PlaybackDataError, availability_at_events,
                                measured_scene, movement_timeline, playback_events,
                                resource_state_events, RESOURCE_TIMELINE_VERSION,
@@ -46,7 +52,10 @@ from projects.finance import (
     verified_finance_result, verified_finance_variant,
 )
 from projects.event_ledger import LEDGER_VERSION, EventInputError, schedule_observed_jobs
+from projects.resource_ledger import RESOURCE_LEDGER_VERSION, schedule_resource_jobs
+from projects.resource_plan import build_route_resources
 from projects.demand import DemandRevisionError, minimum_observed_peak, revised_demand_snapshot
+from projects.catalog_intent import catalog_intent
 from projects.operation_logs import (
     MAX_UPLOAD_BYTES, MAX_ROWS, PARSER_VERSION, OperationLogError, parse_operation_log,
     validate_observation_period, verified_operation_rows,
@@ -81,17 +90,43 @@ def project_create(request, slug):
     if object_title is None:
         raise Http404("Тип объекта не найден")
     form = ProjectCreateForm(request.POST or None)
+    intent_token = (request.POST.get("catalog_model") if request.method == "POST"
+                    else request.GET.get("model"))
+    intent_process = (request.POST.get("catalog_process") if request.method == "POST"
+                      else request.GET.get("process"))
+    intent = None
+    batch = evidence_batch = None
+    if intent_token is not None or intent_process is not None or request.method == "POST":
+        batch, evidence_batch = current_source_pair()
+    supplement = SupplementPublication.objects.select_related("batch").filter(
+        pk="storefront",
+    ).first() if intent_token is not None or request.method == "POST" else None
+    if intent_token is not None or intent_process is not None:
+        source_snapshot = {
+            "catalog_checksum": batch.checksum if batch else None,
+            "evidence_checksum": evidence_batch.checksum if evidence_batch else None,
+            "supplement_checksum": supplement.batch.checksum if supplement else None,
+        }
+        intent = catalog_intent(slug, intent_process, intent_token, source_snapshot)
+        if intent_token is None or intent_process is None or intent is None:
+            if request.method == "GET":
+                raise Http404("Модель или процесс не найдены в текущем каталоге")
+            return render(request, "projects/create.html", {
+                "object_slug": slug, "object_title": object_title, "form": form,
+                "source_error": "Модель или её применение изменились. Откройте карточку в текущем каталоге.",
+            }, status=409)
     if request.method == "POST":
         if not form.is_valid():
             return render(
                 request, "projects/create.html",
-                {"object_slug": slug, "object_title": object_title, "form": form}, status=400,
+                {"object_slug": slug, "object_title": object_title,
+                 "form": form, "catalog_intent": intent}, status=400,
             )
-        batch, evidence_batch = current_source_pair()
         if batch is None or evidence_batch is None:
             return render(request, "projects/create.html", {
                 "object_slug": slug, "object_title": object_title,
-                "form": form, "source_error": "Источники каталога недоступны",
+                "form": form, "catalog_intent": intent,
+                "source_error": "Источники каталога недоступны",
             }, status=503)
         with transaction.atomic():
             snapshot = {
@@ -105,9 +140,6 @@ def project_create(request, slug):
                     "source_type": "not_supplied", "fields": [],
                 },
             }
-            supplement = SupplementPublication.objects.select_related("batch").filter(
-                pk="storefront",
-            ).first()
             if supplement:
                 snapshot["supplement_checksum"] = supplement.batch.checksum
             project = Project.objects.create(
@@ -120,10 +152,14 @@ def project_create(request, slug):
                 number=1,
                 scenario_snapshot=snapshot,
             )
+        if intent:
+            query = urlencode({"process": intent["process"].code, "model": intent["token"]})
+            return redirect(f"{reverse('project_task', args=[project.id])}?{query}")
         return redirect("project_detail", project_id=project.id)
     return render(
         request, "projects/create.html", {
-            "object_slug": slug, "object_title": object_title, "form": form,
+            "object_slug": slug, "object_title": object_title,
+            "form": form, "catalog_intent": intent,
         }
     )
 
@@ -256,6 +292,15 @@ def project_task(request, project_id):
     process = process_for(project.object_slug, process_code)
     if process_code and process is None:
         raise Http404("Процесс для объекта не найден")
+    model_token = (request.POST.get("catalog_model") if request.method == "POST"
+                   else request.GET.get("model"))
+    intent = catalog_intent(project.object_slug, process_code, model_token,
+                            revision.scenario_snapshot) if model_token is not None else None
+    if model_token is not None and intent is None:
+        if request.method == "GET":
+            raise Http404("Модель не найдена для этой версии проекта")
+        return HttpResponse("Модель не найдена для этой версии проекта.", status=409)
+    intent_query = urlencode({"model": intent["token"]}) if intent else ""
     form = None
     if process and not historical:
         previous = saved if saved and saved.get("process") == process.code else None
@@ -275,13 +320,17 @@ def project_task(request, project_id):
                 if expected != latest.number:
                     raise ProfileValidationError("Проект изменился: откройте актуальную ревизию")
                 if comparable(profile) == comparable(saved):
-                    return redirect("project_task", project_id=project.id)
+                    target = reverse("project_task", args=[project.id])
+                    return redirect(f"{target}?{intent_query}" if intent else target)
                 new_revision = _append_snapshot_change(project, "task_profile", profile, expected)
             except (ProfileValidationError, ValueError):
                 form.add_error(None, "Проект изменился: откройте актуальную ревизию")
                 status = 409
             else:
-                return redirect(f"/projects/{project.id}/task/?revision={new_revision.number}")
+                query = {"revision": new_revision.number}
+                if intent:
+                    query["model"] = intent["token"]
+                return redirect(f"{reverse('project_task', args=[project.id])}?{urlencode(query)}")
         else:
             status = 400
     else:
@@ -315,6 +364,14 @@ def project_task(request, project_id):
         if not isinstance(selected, dict):
             selected = {}
         for item in matches:
+            item["is_hinted"] = bool(intent and (
+                item["family"].pk == intent["family_id"]
+                if intent["source_kind"] == "organizer_v4"
+                and item["source_kind"] == "organizer_v4" else
+                item["product_ref"] == intent["product_ref"]
+                if intent["source_kind"] == "manufacturer_supplement"
+                and item["source_kind"] == "manufacturer_supplement" else False
+            ))
             item["is_selected"] = (
                 selected.get("catalog_source_kind") == "manufacturer_supplement"
                 and item["source_kind"] == "manufacturer_supplement"
@@ -324,6 +381,11 @@ def project_task(request, project_id):
                 selected.get("catalog_source_kind") in (None, "organizer_v4")
                 and selected.get("record_index") == item["source_row"].record_index
             )
+        if intent:
+            rank = {"fit": 0, "requires_verification": 1, "reject": 2}
+            matches.sort(key=lambda item: (
+                not item["is_hinted"], rank.get(item["status"], 3),
+            ))
     current_supplement = SupplementPublication.objects.select_related("batch").filter(
         pk="storefront",
     ).first()
@@ -339,6 +401,7 @@ def project_task(request, project_id):
                        for field in process.fields] if form else [],
         "matches": matches, "base_revision": latest.number,
         "robot_selection": revision.scenario_snapshot.get("robot_selection"),
+        "catalog_intent": intent,
         "evidence_checksum": revision.scenario_snapshot.get("evidence_checksum"),
         "supplement_update_available": supplement_update_available,
     }, status=status)
@@ -515,11 +578,19 @@ def project_topology(request, project_id):
     node_form = TopologyNodeForm(request.POST if action in {"add_node", "update_node"} else None,
                                  object_slug=project.object_slug, initial=editing_node)
     edge_form = TopologyEdgeForm(request.POST if action in {"add_edge", "update_edge"} else None,
-                                 topology=topology, initial=editing_edge)
+                                 topology=topology, editing_edge_id=edit_edge_id if action == "update_edge" else None,
+                                 initial=editing_edge)
     route_form = TopologyRouteForm(request.POST if action == "set_route" else None, topology=topology,
                                    initial={"origin": topology["origin"],
                                             "destination": topology["destination"],
                                             "route_flow": topology.get("route_flow")})
+    uploaded_plans = list(project.floor_plan_sources.order_by("-uploaded_at"))
+    plan_form = FloorPlanUploadForm(request.POST if action == "upload_plan" else None,
+                                    request.FILES if action == "upload_plan" else None)
+    calibration_form = FloorPlanCalibrationForm(
+        request.POST if action == "calibrate_plan" else None,
+        topology=topology, plans=uploaded_plans,
+    )
     status = 200
     if request.method == "POST":
         if historical:
@@ -530,7 +601,46 @@ def project_topology(request, project_id):
             expected = None
         if expected != latest.number:
             return _selection_error(request, project, "Проект изменился. Откройте актуальную версию.", 409)
-        if action in {"add_node", "update_node"} and node_form.is_valid():
+        if action == "upload_plan":
+            if plan_form.is_valid():
+                try:
+                    sanitized = sanitize_floor_plan(plan_form.cleaned_data["file"])
+                except FloorPlanError as exc:
+                    plan_form.add_error("file", str(exc))
+                else:
+                    source = FloorPlanSource.objects.create(
+                        project=project, uploaded_by=request.user,
+                        floor=plan_form.cleaned_data["floor"],
+                        filename=plan_form.cleaned_data["file"].name[:255],
+                        source_description=plan_form.cleaned_data["source_description"],
+                        **sanitized,
+                    )
+                    return redirect(f"/projects/{project.id}/topology/?plan={source.id}")
+            status = 400
+        elif action == "calibrate_plan" and calibration_form.is_valid():
+            data = calibration_form.cleaned_data
+            source = next((item for item in uploaded_plans if str(item.id) == data["plan_id"]), None)
+            if source is None:
+                status = 400
+            else:
+                try:
+                    attachment = calibration_for(
+                        topology, source, data["anchor_a"], data["anchor_b"],
+                        [data[key] for key in ("pixel_a_x", "pixel_a_y", "pixel_b_x", "pixel_b_y")],
+                        data["evidence"],
+                    )
+                except FloorPlanError as exc:
+                    calibration_form.add_error(None, str(exc))
+                    status = 400
+                else:
+                    topology.setdefault("floor_plans", {})[source.floor] = attachment
+        elif action == "remove_floor_plan":
+            floor = request.POST.get("floor", "")
+            if floor not in topology.get("floor_plans", {}):
+                status = 400
+            else:
+                topology["floor_plans"].pop(floor)
+        elif action in {"add_node", "update_node"} and node_form.is_valid():
             data = node_form.cleaned_data
             node = {
                 "id": edit_node_id if action == "update_node" else str(uuid4()),
@@ -551,6 +661,16 @@ def project_topology(request, project_id):
                 if not node_form.errors:
                     topology["nodes"] = [node if item["id"] == edit_node_id else item
                                          for item in topology["nodes"]]
+                    original = nodes[edit_node_id]
+                    if any(original.get(key) != node.get(key)
+                           for key in ("x_m", "y_m", "coordinate_source", "floor")):
+                        for edge in topology["edges"]:
+                            if edit_node_id in {edge["start"], edge["end"]}:
+                                edge.pop("waypoints_m", None)
+                                edge.pop("geometry_source", None)
+                    for floor, plan in list(topology.get("floor_plans", {}).items()):
+                        if edit_node_id in {plan["anchor_a"], plan["anchor_b"]}:
+                            topology["floor_plans"].pop(floor)
                 else:
                     status = 400
             else:
@@ -565,6 +685,11 @@ def project_topology(request, project_id):
                 "bidirectional": data["bidirectional"], "access": data.get("access"),
                 "kind": data.get("kind") or "passage", "flow": data.get("flow"),
             }
+            if data.get("waypoints_m"):
+                edge["waypoints_m"] = data["waypoints_m"]
+                edge["geometry_source"] = data["geometry_source"].strip()
+            if data.get("resource_id"):
+                edge.update({name: data[name] for name in TopologyEdgeForm.RESOURCE_FIELDS})
             if action == "update_edge":
                 topology["edges"] = [edge if item["id"] == edit_edge_id else item
                                      for item in topology["edges"]]
@@ -580,6 +705,9 @@ def project_topology(request, project_id):
             if not any(node["id"] == node_id for node in topology["nodes"]):
                 return _selection_error(request, project, "Точка не найдена.", 400)
             topology["nodes"] = [node for node in topology["nodes"] if node["id"] != node_id]
+            for floor, plan in list(topology.get("floor_plans", {}).items()):
+                if node_id in {plan["anchor_a"], plan["anchor_b"]}:
+                    topology["floor_plans"].pop(floor)
             topology["edges"] = [edge for edge in topology["edges"]
                                  if node_id not in {edge["start"], edge["end"]}]
             if node_id in {topology["origin"], topology["destination"]}:
@@ -601,14 +729,57 @@ def project_topology(request, project_id):
             return redirect(f"/projects/{project.id}/topology/?revision={new_revision.number}")
     route = route_result(topology)
     cycle = transport_cycle_route(topology, route)
+    try:
+        drawings = floor_drawings(topology, route)
+        _attach_floor_plan_urls(project, drawings, "floor")
+    except (PlaybackDataError, RouteGeometryError) as exc:
+        return _selection_error(request, project, str(exc), 409)
+    plan_options = [{"id": str(item.id), "floor": item.floor, "filename": item.filename,
+                     "url": reverse("project_floor_plan", args=[project.id, item.id]),
+                     "width": item.width_px, "height": item.height_px,
+                     "source": item.source_description} for item in uploaded_plans]
     return render(request, "projects/topology.html", {
         "project": project, "revision": revision, "process": process,
         "historical": historical, "topology": topology, "route": route, "cycle": cycle,
-        "drawings": floor_drawings(topology, route),
+        "drawings": drawings, "plan_options": plan_options,
+        "plan_form": plan_form, "calibration_form": calibration_form,
         "node_form": node_form, "edge_form": edge_form, "route_form": route_form,
         "base_revision": latest.number, "form_error": status == 400,
         "editing_node": editing_node, "editing_edge": editing_edge,
     }, status=status)
+
+
+def _attach_floor_plan_urls(project, drawings, label_key):
+    """Only emit private URLs to verified, project-owned pinned images."""
+    for drawing in drawings:
+        plan = drawing.get("plan")
+        if not plan:
+            continue
+        source = FloorPlanSource.objects.filter(
+            id=plan["id"], project=project, floor=drawing[label_key],
+            png_sha256=plan["png_sha256"],
+        ).first()
+        if source is None or hashlib.sha256(bytes(source.image_png)).hexdigest() != source.png_sha256:
+            raise PlaybackDataError(
+                f"Сохранённый план уровня {drawing[label_key]} отсутствует или повреждён. "
+                "Воспроизведение калиброванной схемы остановлено."
+            )
+        plan["url"] = reverse("project_floor_plan", args=[project.id, source.id])
+
+
+@login_required
+@require_GET
+def project_floor_plan(request, project_id, plan_id):
+    source = get_object_or_404(FloorPlanSource, id=plan_id,
+                               project_id=project_id, project__owner=request.user)
+    data = bytes(source.image_png)
+    if hashlib.sha256(data).hexdigest() != source.png_sha256:
+        raise Http404("План повреждён")
+    response = HttpResponse(data, content_type="image/png")
+    response["Cache-Control"] = "private, no-store"
+    response["X-Content-Type-Options"] = "nosniff"
+    response["Content-Security-Policy"] = "default-src 'none'; sandbox"
+    return response
 
 
 def _manufacturer_speed_limits(snapshot):
@@ -960,9 +1131,12 @@ def project_simulation(request, project_id):
     error = None
     scene = None
     playback = None
+    metrics = None
     if run:
         try:
             _, _, _, calendar_rows = _verified_transport_run(run, project)
+            from projects.simulation_metrics import simulation_metrics
+            metrics = simulation_metrics(run.ledger, calendar_rows)
             timeline = playback_events(
                 run.ledger, calendar_rows,
                 resource_events=(run.resource_events if run.input_snapshot.get(
@@ -978,6 +1152,7 @@ def project_simulation(request, project_id):
             event_page = timeline[(page_number - 1) * 100:page_number * 100]
             saved_snapshot = run.input_snapshot["scenario"]
             scene = measured_scene(saved_snapshot)
+            _attach_floor_plan_urls(project, scene["floors"], "label")
             initial_time = (
                 timeline[(page_number - 1) * 100 - 1]["at_s"]
                 if page_number > 1 else "0"
@@ -998,6 +1173,13 @@ def project_simulation(request, project_id):
                     page_start=initial_time,
                     page_end=event_page[-1]["at_s"] if event_page else initial_time,
                 ),
+                "resource_reservations": (
+                    [claim for claim in run.ledger["resource_reservations"]
+                     if Decimal(claim["start_s"]) <= Decimal(event_page[-1]["at_s"])
+                     and Decimal(claim["end_s"]) >= Decimal(initial_time)]
+                    if run.ledger_version == RESOURCE_LEDGER_VERSION and event_page else []
+                ),
+                "resource_plan": run.input_snapshot.get("resource_plan"),
             }
         except (OperationLogError, AvailabilityError, EventInputError,
                 PlaybackDataError, KeyError, TypeError, AttributeError,
@@ -1021,12 +1203,20 @@ def project_simulation(request, project_id):
                     origin_node=origin_node,
                 )
                 source = f"{plan.source_description}; SHA-256 {plan.sha256}"
-                ledger = schedule_observed_jobs(
-                    [{**job, "service_seconds": sizing["cycle_seconds"],
-                      "handoff_seconds": sizing["handoff_seconds"]} for job in jobs],
-                    available_windows(rows, source=source),
-                    period_start=log.period_start_at, period_end=log.period_end_at,
-                )
+                timed_jobs = [{**job, "service_seconds": sizing["cycle_seconds"],
+                               "handoff_seconds": sizing["handoff_seconds"]} for job in jobs]
+                windows = available_windows(rows, source=source)
+                route_plan = build_route_resources(snapshot, sizing)
+                if route_plan is None:
+                    ledger = schedule_observed_jobs(
+                        timed_jobs, windows, period_start=log.period_start_at,
+                        period_end=log.period_end_at,
+                    )
+                else:
+                    ledger = schedule_resource_jobs(
+                        timed_jobs, windows, route_plan["phases"], route_plan["resources"],
+                        period_start=log.period_start_at, period_end=log.period_end_at,
+                    )
             except (OperationLogError, AvailabilityError, EventInputError) as exc:
                 error, status = str(exc), 409
             else:
@@ -1041,9 +1231,11 @@ def project_simulation(request, project_id):
                     "cycle_semantics": "complete_robot_cycle",
                     "delivery_semantics": "handoff_after_outbound_and_unloading",
                 }
+                if route_plan is not None:
+                    input_snapshot["resource_plan"] = route_plan
                 run, _ = SimulationRun.objects.get_or_create(
                     project=project, revision=revision, operation_log=log,
-                    availability_plan=plan, ledger_version=LEDGER_VERSION,
+                    availability_plan=plan, ledger_version=ledger["version"],
                     defaults={"created_by": request.user,
                               "input_snapshot": input_snapshot, "ledger": ledger,
                               "resource_events": resource_state_events(
@@ -1072,7 +1264,7 @@ def project_simulation(request, project_id):
         "project": project, "revision": revision, "process": process,
         "log": log, "plan": plan, "sizing": sizing, "ready": ready,
         "run": run, "parent_run": parent_run, "event_page": event_page,
-        "scene": scene, "playback": playback,
+        "scene": scene, "playback": playback, "metrics": metrics,
         "page_number": page_number, "page_count": page_count,
         "previous_page": page_number - 1 if page_number > 1 else None,
         "next_page": page_number + 1 if page_number < page_count else None,
@@ -1086,7 +1278,8 @@ def project_simulation(request, project_id):
 def _verified_transport_run(run, project):
     """Reproduce a saved transport run from its pinned raw inputs."""
     snapshot = run.revision.scenario_snapshot
-    if not isinstance(snapshot, dict) or not isinstance(run.input_snapshot, dict):
+    if (not isinstance(snapshot, dict) or not isinstance(run.input_snapshot, dict)
+            or not isinstance(run.ledger, dict)):
         raise PlaybackDataError("Снимок сохранённого прогона повреждён.")
     task = snapshot.get("task_profile") or {}
     if not isinstance(task, dict):
@@ -1111,7 +1304,8 @@ def _verified_transport_run(run, project):
             or plan_ref.get("id") != str(run.availability_plan_id)
             or plan_ref.get("sha256") != run.availability_plan.sha256
             or plan_ref.get("operation_log_id") != str(run.operation_log_id)
-            or run.ledger_version != LEDGER_VERSION
+            or run.ledger_version not in (LEDGER_VERSION, RESOURCE_LEDGER_VERSION)
+            or run.ledger.get("version") != run.ledger_version
             or run.operation_log.project_id != project.id
             or run.availability_plan.project_id != project.id
             or run.availability_plan.operation_log_id != run.operation_log_id
@@ -1147,13 +1341,25 @@ def _verified_transport_run(run, project):
     elif timeline_version is not None or run.resource_events:
         raise PlaybackDataError("Версия событий ресурсов исходного прогона не поддерживается.")
     source = f"{run.availability_plan.source_description}; SHA-256 {run.availability_plan.sha256}"
-    ledger = schedule_observed_jobs(
-        [{**job, "service_seconds": sizing["cycle_seconds"],
-          "handoff_seconds": sizing["handoff_seconds"]} for job in jobs],
-        available_windows(calendar, source=source),
-        period_start=run.operation_log.period_start_at,
-        period_end=run.operation_log.period_end_at,
-    )
+    timed_jobs = [{**job, "service_seconds": sizing["cycle_seconds"],
+                   "handoff_seconds": sizing["handoff_seconds"]} for job in jobs]
+    windows = available_windows(calendar, source=source)
+    if run.ledger_version == RESOURCE_LEDGER_VERSION:
+        route_plan = build_route_resources(snapshot, sizing)
+        if route_plan is None or run.input_snapshot.get("resource_plan") != route_plan:
+            raise PlaybackDataError("Подтверждённые ограничения участка не воспроизводятся.")
+        ledger = schedule_resource_jobs(
+            timed_jobs, windows, route_plan["phases"], route_plan["resources"],
+            period_start=run.operation_log.period_start_at,
+            period_end=run.operation_log.period_end_at,
+        )
+    else:
+        if "resource_plan" in run.input_snapshot:
+            raise PlaybackDataError("Версия ресурсного плана не согласована с прогоном.")
+        ledger = schedule_observed_jobs(
+            timed_jobs, windows, period_start=run.operation_log.period_start_at,
+            period_end=run.operation_log.period_end_at,
+        )
     if ledger != run.ledger:
         raise PlaybackDataError("События исходного прогона не воспроизводятся.")
     return process, sizing, jobs, calendar
@@ -1303,7 +1509,7 @@ def project_finance(request, project_id):
         request.POST if request.method == "POST" and not is_variant_post else None,
         request.FILES if request.method == "POST" and not is_variant_post else None,
     )
-    variant_form = FinanceVariantForm(request.POST if is_variant_post else None)
+    variant_form = FinanceVariantForm(request.POST if is_variant_post else None, auto_id="variant_%s")
     selected_plan = None
     plan_text = request.POST.get("plan") if is_variant_post else request.GET.get("plan")
     if plan_text:
@@ -1495,9 +1701,11 @@ def project_finance(request, project_id):
                 EventInputError, FinanceInputError) as exc:
             error, status = str(exc), 409
             parent_finance_plan = parent_finance_result = None
+    from projects.finance_builder import initial_investment
     return render(request, "projects/finance.html", {
         "project": project, "run": run, "plan": selected_plan,
         "result": result, "month_rows": month_rows,
+        "initial_investment": initial_investment(selected_plan.rows) if result and selected_plan else None,
         "form": form, "variant_form": variant_form, "error": error,
         "variant": selected_variant, "variant_result": variant_result,
         "archived_contract": archived_contract,

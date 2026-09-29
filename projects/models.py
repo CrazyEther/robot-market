@@ -50,6 +50,28 @@ class ProjectRevision(models.Model):
         super().save(*args, **kwargs)
 
 
+class FloorPlanSource(models.Model):
+    """Immutable, owner-private raster; revisions pin its sanitized checksum."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="floor_plan_sources")
+    uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    floor = models.CharField(max_length=40)
+    filename = models.CharField(max_length=255)
+    source_description = models.CharField(max_length=500)
+    original_sha256 = models.CharField(max_length=64)
+    png_sha256 = models.CharField(max_length=64)
+    image_png = models.BinaryField()
+    width_px = models.PositiveIntegerField()
+    height_px = models.PositiveIntegerField()
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError("Сохранённый план этажа нельзя изменять.")
+        super().save(*args, **kwargs)
+
+
 class OperationLog(models.Model):
     """Immutable raw source and its PII-free normalized rows for one project."""
 

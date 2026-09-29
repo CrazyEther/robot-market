@@ -183,7 +183,7 @@ class FinanceAccessTests(TestCase):
 
 
 class FinanceSourceJourneyTests(TestCase):
-    def test_attested_run_to_raw_plan_to_reopened_result(self):
+    def make_transport_run(self):
         owner = get_user_model().objects.create_user(username="finance-journey-owner")
         project = Project.objects.create(owner=owner, name="Расчёт", object_slug="warehouse")
         process = process_for("warehouse", "warehouse_pallet_transfer")
@@ -205,8 +205,10 @@ class FinanceSourceJourneyTests(TestCase):
             "topology_profile": {
                 "object_slug": "warehouse", "process": process.code,
                 "origin": "origin", "destination": "destination",
-                "nodes": [{"id": "origin", "label": "Начало", "floor": "1"},
-                          {"id": "destination", "label": "Конец", "floor": "1"}],
+                "nodes": [{"id": "origin", "label": "Начало", "floor": "1",
+                           "x_m": "0", "y_m": "0", "coordinate_source": "test measurement"},
+                          {"id": "destination", "label": "Конец", "floor": "1",
+                           "x_m": "10", "y_m": "0", "coordinate_source": "test measurement"}],
                 "edges": [{"id": "route", "start": "origin", "end": "destination",
                            "length_m": "10", "source": "test route source",
                            "length_source": "test route measurement", "bidirectional": True}],
@@ -275,6 +277,10 @@ class FinanceSourceJourneyTests(TestCase):
                             "availability_sha256": availability_sha,
                             "delivery_semantics": "handoff_after_outbound_and_unloading"},
         )
+        return owner, project, run
+
+    def test_attested_run_to_raw_plan_to_reopened_result(self):
+        owner, project, run = self.make_transport_run()
         self.client.force_login(owner)
         url = reverse("project_finance", args=[project.id])
         raw_plan = _csv(_contract_rows())
@@ -386,7 +392,23 @@ class FinanceSourceJourneyTests(TestCase):
         self.assertIsNone(same_plan.context["plan_comparison"])
         self.assertEqual(bytes(plan.raw_csv), raw_plan)
         other = get_user_model().objects.create_user(username="finance-variant-other")
+        from projects.test_finance_builder import commercial_input
+        builder_url = reverse("project_finance_builder", args=[project.id])
+        builder_data = {**commercial_input(), "run": str(run.id)}
+        created = self.client.post(builder_url, builder_data)
+        self.assertEqual(created.status_code, 302)
+        created_page = self.client.get(created["Location"])
+        self.assertContains(created_page, "Первоначальные вложения")
+        generated = created_page.context["plan"]
+        self.assertEqual(generated.result, verified_finance_result(generated))
+        self.assertEqual(self.client.post(builder_url, builder_data)["Location"], created["Location"])
+        self.assertEqual(self.client.post(builder_url, {**builder_data, "robot_price": ""}).status_code, 400)
+        report = self.client.get(reverse("project_report_bundle", args=[project.id]),
+                                 {"run": str(run.id), "plan": str(generated.id)})
+        self.assertEqual(report.status_code, 200)
         self.client.force_login(other)
+        self.assertEqual(self.client.get(builder_url, {"run": str(run.id)}).status_code, 404)
+        self.assertEqual(self.client.post(builder_url, builder_data).status_code, 404)
         self.assertEqual(self.client.get(variant_response["Location"]).status_code, 404)
         self.assertEqual(self.client.get(revised_upload["Location"]).status_code, 404)
         self.assertEqual(self.client.get(source_url).status_code, 404)
@@ -395,3 +417,5 @@ class FinanceSourceJourneyTests(TestCase):
         self.assertEqual(self.client.get(variant_response["Location"]).status_code, 409)
         FinancePlan.objects.filter(pk=plan.pk).update(result={"tampered": True})
         self.assertEqual(self.client.get(saved["Location"]).status_code, 409)
+        SimulationRun.objects.filter(pk=run.pk).update(ledger={"tampered": True})
+        self.assertEqual(self.client.post(builder_url, builder_data).status_code, 409)

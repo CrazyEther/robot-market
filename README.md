@@ -36,7 +36,7 @@ docker compose up --build
 ```sh
 python manage.py check
 python manage.py makemigrations --check --dry-run
-CATALOG_SOURCE_PATH=/absolute/path/to/catalog_export_v4.csv RESEARCH_CLAIMS_PATH=/absolute/path/to/verified_claims.json SUPPLEMENT_MANIFEST_PATH=/absolute/path/to/supplement_products.json SUPPLEMENT_ASSET_DIR=/absolute/path/to/archived_sources python manage.py test
+CATALOG_SOURCE_PATH=/absolute/path/to/catalog_export_v4.csv CATALOG_SOURCE_SHA256=VERIFIED_SOURCE_SHA256 RESEARCH_CLAIMS_PATH=/absolute/path/to/verified_claims.json RESEARCH_CLAIMS_SHA256=VERIFIED_CLAIMS_SHA256 SUPPLEMENT_MANIFEST_PATH=/absolute/path/to/supplement_products.json SUPPLEMENT_ASSET_DIR=/absolute/path/to/archived_sources python manage.py test
 ```
 
 Проверки импорта используют исходный файл, указанный в `CATALOG_SOURCE_PATH`, отдельно проверенный реестр первичных утверждений `RESEARCH_CLAIMS_PATH` и закрытое дополнение производителей с точными первичными снимками. Файлы предоставляются вне Git. Загружать медицинские данные с персональными сведениями нельзя.

@@ -43,13 +43,13 @@ def publicly_available_evidence(checksum, batch):
 
 
 def visible_families(batch, evidence_batch):
-    return CatalogFamily.objects.filter(
-        batch=batch,
-        source_rows__evidence_claims__evidence_batch=evidence_batch,
-        source_rows__evidence_claims__use__in=(
-            "matching_limit", "offer_specific", "product_copy",
-        ),
-        source_rows__evidence_claims__value__isnull=False,
-    ).distinct().annotate(
+    """Return all families in a previously resolved public source batch.
+
+    Buyer-facing visibility is intentionally separate from evidence eligibility
+    for matching. Callers must resolve the batch/evidence publication first.
+    """
+    if batch is None or evidence_batch is None or evidence_batch.catalog_batch_id != batch.pk:
+        return CatalogFamily.objects.none()
+    return CatalogFamily.objects.filter(batch=batch).annotate(
         display_category=Coalesce(NullIf("subtype", Value("")), "type_label"),
     )

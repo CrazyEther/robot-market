@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 from urllib.request import Request
 
 from django.core.management import call_command
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils.html import strip_tags
 
@@ -139,14 +139,49 @@ class CatalogSourceTests(TestCase):
             "batch": self.batch.checksum, "evidence": batch.checksum,
         })
         self.assertContains(pinned_catalog, batch.checksum)
-        self.assertEqual(pinned_catalog.context["page"].paginator.count, 7)
-        self.assertNotContains(pinned_catalog, "85ТК")
-        self.assertNotContains(pinned_catalog, '<option value="brs"')
+        self.assertContains(
+            pinned_catalog,
+            f"?batch={self.batch.checksum}&amp;evidence={batch.checksum}",
+        )
+        family_count = self.batch.families.count()
+        self.assertEqual(pinned_catalog.context["page"].paginator.count, family_count)
         self.assertNotContains(pinned_catalog, "революция в складской логистике")
-        amr_page = self.client.get(reverse("catalog_index"), {"category": "AMR"})
-        self.assertEqual(amr_page.context["page"].paginator.count, 2)
-        mobile_page = self.client.get(reverse("catalog_index"), {"category": "Мобильные роботы"})
-        self.assertEqual(mobile_page.context["page"].paginator.count, 1)
+        expected_ids = set(self.batch.families.values_list("pk", flat=True))
+        with override_settings(CATALOG_PAGE_SIZE=17):
+            first = self.client.get(reverse("catalog_index"), {
+                "batch": self.batch.checksum, "evidence": batch.checksum,
+            })
+            family_ids = []
+            for page_number in range(1, first.context["page"].paginator.num_pages + 1):
+                response = first if page_number == 1 else self.client.get(
+                    reverse("catalog_index"), {
+                        "batch": self.batch.checksum, "evidence": batch.checksum,
+                        "page": page_number,
+                    },
+                )
+                family_ids.extend(
+                    item.pk for source, item in response.context["page"].object_list
+                    if source == "organizer_v4"
+                )
+            self.assertEqual(set(family_ids), expected_ids)
+            self.assertEqual(len(family_ids), len(expected_ids))
+
+        categories = [family.subtype or family.type_label
+                      for family in self.batch.families.all()]
+        category = next(value for value in categories if value)
+        category_expected = sum(value == category for value in categories)
+        category_page = self.client.get(reverse("catalog_index"), {
+            "category": category,
+        })
+        self.assertEqual(category_page.context["page"].paginator.count, category_expected)
+        industry = next(value for value in self.batch.source_rows.values_list(
+            "application__industry", flat=True,
+        ) if value)
+        industry_expected = self.batch.source_rows.filter(
+            application__industry=industry,
+        ).values("family_id").distinct().count()
+        industry_page = self.client.get(reverse("catalog_index"), {"industry": industry})
+        self.assertEqual(industry_page.context["page"].paginator.count, industry_expected)
         self.assertEqual(CatalogSourceRow.objects.filter(batch=self.batch).count(), len(self.records))
         self.assertEqual(self.client.get(reverse("catalog_index"), {
             "batch": self.batch.checksum, "evidence": "0" * 64,
@@ -217,11 +252,11 @@ class CatalogSourceTests(TestCase):
         self.assertContains(detail, "Технические данные")
         self.assertContains(detail, linked.source_url)
         self.assertContains(detail, "Грузоподъёмность")
+        self.assertContains(detail, "Исходные описания каталога")
+        self.assertContains(detail, "Строка каталога 1")
         self.assertContains(self.client.get(reverse("catalog_index"), {"q": family.name}), family.name)
         visible = strip_tags(detail.content.decode())
-        for diagnostic in (self.batch.source_label, "валюта не подтверждена",
-                           "Статус НДС не подтверждён источником", "Не предоставлены в CSV",
-                           "Каждая строка ниже", "Источник цены"):
+        for diagnostic in (self.batch.source_label, "Не предоставлены в CSV"):
             self.assertNotIn(diagnostic, visible)
         self.assertContains(
             self.client.get(reverse("catalog_family_detail", args=[family.pk]), {"evidence": batch.checksum}),
@@ -231,9 +266,21 @@ class CatalogSourceTests(TestCase):
         tractor = CatalogSourceRow.objects.get(batch=self.batch, record_index=88).family
         tractor_page = self.client.get(reverse("catalog_family_detail", args=[tractor.pk]),
                                        {"evidence": batch.checksum})
-        self.assertEqual(tractor_page.status_code, 404)
+        self.assertEqual(tractor_page.status_code, 200)
+        self.assertContains(tractor_page, "не подтверждение применимости")
         tractor_search = self.client.get(reverse("catalog_index"), {"q": tractor.name})
-        self.assertEqual(tractor_search.context["page"].paginator.count, 0)
+        self.assertEqual(tractor_search.context["page"].paginator.count, 1)
+
+        multirow_family = next(
+            candidate for candidate in self.batch.families.all()
+            if candidate.source_rows.count() > 1
+        )
+        multirow_page = self.client.get(reverse("catalog_family_detail", args=[multirow_family.pk]))
+        expected_rows = list(multirow_family.source_rows.order_by("record_index"))
+        self.assertEqual(len(multirow_page.context["rows"]), len(expected_rows))
+        for source_row in expected_rows:
+            self.assertContains(multirow_page, f"Строка каталога {source_row.record_index}")
+
         h1500_text = strip_tags(detail.content.decode())
         self.assertIn("2 160 000", h1500_text)
         self.assertIn("от 100 роботов", h1500_text)

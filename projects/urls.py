@@ -1,6 +1,7 @@
 from django.urls import path
 
 from projects import views
+from projects.views_finance_builder import project_finance_builder
 
 
 urlpatterns = [
@@ -13,12 +14,15 @@ urlpatterns = [
     path("<uuid:project_id>/models/refresh/", views.project_supplement_refresh,
          name="project_supplement_refresh"),
     path("<uuid:project_id>/topology/", views.project_topology, name="project_topology"),
+    path("<uuid:project_id>/floor-plan/<uuid:plan_id>.png", views.project_floor_plan,
+         name="project_floor_plan"),
     path("<uuid:project_id>/sizing/", views.project_sizing, name="project_sizing"),
     path("<uuid:project_id>/operations/", views.project_operation_log, name="project_operation_log"),
     path("<uuid:project_id>/availability/", views.project_availability, name="project_availability"),
     path("<uuid:project_id>/simulation/", views.project_simulation, name="project_simulation"),
     path("<uuid:project_id>/demand/", views.project_demand_revision, name="project_demand_revision"),
     path("<uuid:project_id>/finance/", views.project_finance, name="project_finance"),
+    path("<uuid:project_id>/finance/build/", project_finance_builder, name="project_finance_builder"),
     path("<uuid:project_id>/finance/columns.csv", views.project_finance_schema,
          name="project_finance_schema"),
     path("<uuid:project_id>/finance/source.csv", views.project_finance_source,

@@ -1,6 +1,8 @@
 from django import forms
 from decimal import Decimal
 
+from projects.event_ledger import EventInputError
+from projects.resource_plan import parse_resource_windows
 from projects.task_profiles import PALLET_HANDOFF_MODES, process_for
 from projects.sizing import NONNEGATIVE_FIELDS, sizing_fields
 
@@ -38,6 +40,38 @@ class TopologyNodeForm(forms.Form):
         return values
 
 
+class FloorPlanUploadForm(forms.Form):
+    floor = forms.CharField(label="Этаж или уровень на плане", max_length=40)
+    file = forms.FileField(label="План этажа (PNG или JPEG, до 8 МБ)")
+    source_description = forms.CharField(label="Источник и версия плана", max_length=500)
+    source_attested = forms.BooleanField(
+        label="Подтверждаю право обработки изображения и отсутствие персональных данных")
+
+
+class FloorPlanCalibrationForm(forms.Form):
+    plan_id = forms.ChoiceField(label="Загруженный план")
+    anchor_a = forms.ChoiceField(label="Измеренная точка A")
+    anchor_b = forms.ChoiceField(label="Измеренная точка Б")
+    pixel_a_x = forms.DecimalField(label="A: X изображения, пикс.", max_digits=12,
+                                   decimal_places=2, min_value=Decimal(0))
+    pixel_a_y = forms.DecimalField(label="A: Y изображения, пикс.", max_digits=12,
+                                   decimal_places=2, min_value=Decimal(0))
+    pixel_b_x = forms.DecimalField(label="Б: X изображения, пикс.", max_digits=12,
+                                   decimal_places=2, min_value=Decimal(0))
+    pixel_b_y = forms.DecimalField(label="Б: Y изображения, пикс.", max_digits=12,
+                                   decimal_places=2, min_value=Decimal(0))
+    evidence = forms.CharField(label="Основание сопоставления двух точек", max_length=500)
+
+    def __init__(self, *args, topology, plans, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["plan_id"].choices = [(str(plan.id), f"{plan.floor} — {plan.filename}")
+                                          for plan in plans]
+        self.fields["anchor_a"].choices = self.fields["anchor_b"].choices = [
+            (node["id"], f'{node["label"]} · {node.get("floor") or "Общий уровень"}')
+            for node in topology["nodes"] if node.get("coordinate_source")
+            and node.get("x_m") is not None and node.get("y_m") is not None]
+
+
 class TopologyEdgeForm(forms.Form):
     start = forms.ChoiceField(label="Откуда")
     end = forms.ChoiceField(label="Куда")
@@ -45,6 +79,15 @@ class TopologyEdgeForm(forms.Form):
     length_m = forms.DecimalField(label="Длина участка, м", required=False,
                                   max_digits=12, decimal_places=3, min_value=Decimal("0.001"))
     length_source = forms.CharField(label="Источник длины", max_length=500, required=False)
+    waypoints_text = forms.CharField(
+        label="Поворотные точки маршрута — X;Y (метры), по одной на строку",
+        required=False, max_length=2048, widget=forms.Textarea(attrs={"rows": 3}),
+        help_text="Только точки внутри одного измеренного этажа; крайние точки уже заданы выше. "
+                  "Промежуточная геометрия уточняет рисунок, не меняет измеренную длину и время движения.",
+    )
+    geometry_source = forms.CharField(
+        label="Источник координат поворотных точек", max_length=500, required=False,
+    )
     bidirectional = forms.BooleanField(label="Проход в обе стороны", required=False)
     access = forms.ChoiceField(label="Доступ", required=False,
                                choices=(("", "Выберите"), ("public", "Общая зона"),
@@ -56,10 +99,52 @@ class TopologyEdgeForm(forms.Form):
     flow = forms.ChoiceField(label="Санитарный поток", required=False,
                              choices=(("", "Выберите"), ("clean", "Чистый"),
                                       ("dirty", "Грязный")))
+    resource_id = forms.RegexField(
+        label="Идентификатор общего участка или лифта", required=False,
+        regex=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$", max_length=80,
+        error_messages={"invalid": "Используйте латинские буквы, цифры, точку, дефис или подчёркивание."},
+    )
+    resource_capacity = forms.IntegerField(
+        label="Одновременная вместимость, роботов", required=False, min_value=1, max_value=10_000,
+    )
+    resource_direction_policy = forms.ChoiceField(
+        label="Совместимость направлений", required=False,
+        choices=(("", "Не подтверждена"), ("mixed", "Встречные направления одновременно допустимы"),
+                 ("alternating", "В каждый момент только одно направление")),
+    )
+    resource_occupancy_policy = forms.ChoiceField(
+        label="Правило занятия ресурса", required=False,
+        choices=(("", "Не подтверждено"), ("entry_to_exit", "От входа на участок до выхода")),
+    )
+    resource_priority_policy = forms.ChoiceField(
+        label="Приоритет входа", required=False,
+        choices=(("", "Не подтверждён"), ("fifo", "FIFO по очереди прибытия"),
+                 ("operator_defined", "Иной подтверждённый регламент")),
+    )
+    resource_schedule = forms.CharField(
+        label="Подтверждённые рабочие окна ресурса", max_length=500, required=False,
+        help_text=("Введите начало/конец каждого окна в ISO-8601 с часовым поясом. "
+                   "Например: 2026-09-28T08:00:00+05:00/2026-09-28T20:00:00+05:00; "
+                   "несколько окон разделяйте точкой с запятой. Источник укажите отдельно."),
+    )
+    resource_source = forms.CharField(
+        label="Источник всех ограничений ресурса", max_length=500, required=False,
+        help_text="Документ объекта должен подтверждать вместимость, направления, занятие, приоритет и окна.",
+    )
 
-    def __init__(self, *args, topology, **kwargs):
+    RESOURCE_FIELDS = (
+        "resource_id", "resource_capacity", "resource_direction_policy", "resource_occupancy_policy",
+        "resource_priority_policy", "resource_schedule", "resource_source",
+    )
+
+    def __init__(self, *args, topology, editing_edge_id=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.topology = topology
+        self.editing_edge_id = editing_edge_id
+        initial = kwargs.get("initial") or {}
+        if not self.is_bound and initial.get("waypoints_m"):
+            self.initial["waypoints_text"] = "\n".join(
+                f'{point["x_m"]};{point["y_m"]}' for point in initial["waypoints_m"])
         choices = [(node["id"], f'{node["label"]} · {node["floor"]}') for node in topology["nodes"]]
         self.fields["start"].choices = choices
         self.fields["end"].choices = choices
@@ -90,6 +175,36 @@ class TopologyEdgeForm(forms.Form):
             self.add_error("length_source", "Укажите источник измеренной длины.")
         if values.get("length_m") is None and values.get("length_source"):
             self.add_error("length_source", "Добавьте длину или удалите источник.")
+        if "waypoints_text" not in self.errors and "geometry_source" not in self.errors:
+            from projects.path_geometry import RouteGeometryError, parse_waypoint_lines, validate_waypoints
+            try:
+                waypoints = parse_waypoint_lines(values.get("waypoints_text") or "")
+                values["waypoints_m"] = validate_waypoints(
+                    self.topology, values.get("start"), values.get("end"), waypoints,
+                    values.get("geometry_source") or "", values.get("length_m"),
+                )
+            except RouteGeometryError as exc:
+                self.add_error("waypoints_text", str(exc))
+        if any(values.get(name) not in (None, "") for name in self.RESOURCE_FIELDS):
+            for name in self.RESOURCE_FIELDS:
+                if values.get(name) in (None, ""):
+                    self.add_error(name, "Для подтверждённого ограничения заполните всё описание ресурса.")
+            if (values.get("resource_schedule") and values.get("resource_source")
+                    and "resource_schedule" not in self.errors):
+                try:
+                    parse_resource_windows(values["resource_schedule"], values["resource_source"])
+                except EventInputError as exc:
+                    self.add_error("resource_schedule", str(exc))
+            if values.get("resource_id") and not any(name in self.errors for name in self.RESOURCE_FIELDS):
+                for existing in self.topology["edges"]:
+                    if (existing.get("id") == self.editing_edge_id
+                            or existing.get("resource_id") != values["resource_id"]):
+                        continue
+                    self.add_error(
+                        "resource_id", "Текущая модель привязывает один ресурс к одному участку. "
+                        "Для нескольких участков с одним ресурсом нужна подтверждённая общая ориентация.",
+                    )
+                    break
         return values
 
 

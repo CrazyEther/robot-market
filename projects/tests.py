@@ -838,7 +838,7 @@ class ProjectJourneyTests(TestCase):
                 self.assertEqual(self.client.post(url, {"process": process_code}).status_code, 404)
                 self.client.force_login(self.owner)
 
-    def test_unpublished_airport_candidate_keeps_evidence_without_storefront_link(self):
+    def test_airport_candidate_is_visible_without_becoming_fit_or_storefront_link(self):
         self.client.post(reverse("project_create", args=["airport"]), {"name": "Аэропорт"})
         project = Project.objects.get(owner=self.owner, name="Аэропорт")
         self.client.post(reverse("project_task", args=[project.id]), {
@@ -850,11 +850,13 @@ class ProjectJourneyTests(TestCase):
         )[0]
         self.assertEqual(candidate["status"], "requires_verification")
         family_url = reverse("catalog_family_detail", args=[candidate["family"].pk])
-        self.assertEqual(self.client.get(family_url).status_code, 404)
+        family_page = self.client.get(family_url)
+        self.assertEqual(family_page.status_code, 200)
+        self.assertContains(family_page, "не подтверждение применимости или статуса fit")
         task_page = self.client.get(reverse("project_task", args=[project.id]))
         self.assertContains(task_page, candidate["family"].name)
         self.assertContains(task_page, candidate["application_sources"][0]["source_url"])
-        self.assertNotContains(task_page, f'href="{family_url}')
+        self.assertContains(task_page, f'href="{family_url}')
 
         selected = self.client.post(reverse("project_robot_selection", args=[project.id]), {
             "action": "select", "record_index": candidate["source_row"].record_index,
@@ -863,7 +865,7 @@ class ProjectJourneyTests(TestCase):
         self.assertEqual(selected.status_code, 302)
         detail = self.client.get(reverse("project_detail", args=[project.id]))
         self.assertContains(detail, candidate["family"].name)
-        self.assertNotContains(detail, f'href="{family_url}')
+        self.assertContains(detail, f'href="{family_url}')
 
         self.client.post(reverse("project_create", args=["warehouse"]), {"name": "Склад"})
         warehouse = Project.objects.get(owner=self.owner, name="Склад")

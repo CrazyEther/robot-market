@@ -1,6 +1,8 @@
 """Owner-only export renderers for a previously verified run and cash-flow plan."""
 
 import csv
+import base64
+import hashlib
 import io
 import json
 from decimal import Decimal
@@ -20,12 +22,16 @@ from reportlab.platypus import (
     HRFlowable, KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table,
     TableStyle,
 )
-from reportlab.graphics.shapes import Circle, Drawing, Line, String
+from reportlab.graphics.shapes import Circle, Drawing, Image as GraphicImage, Line, String
+from PIL import Image as PILImage
 
 from projects.finance import HEADER, SCENARIOS
-from projects.playback import measured_scene, movement_timeline, state_before
+from projects.finance_builder import initial_investment
+from projects.models import FloorPlanSource
+from projects.playback import measured_scene, movement_timeline, position_on_path, state_before
 from projects.selection_refs import selection_key, selection_ref
 from projects.sizing import sizing_fields
+from projects.simulation_metrics import simulation_metrics
 from projects.task_profiles import process_for
 
 
@@ -90,7 +96,8 @@ def _robot_positions(snapshot, sizing, ledger, scene, event_index):
         elapsed = moment - Decimal(cycle["start_s"])
         if elapsed < 0 or moment >= Decimal(cycle["end_s"]):
             continue
-        stage = next((stage for stage in motion["stages"]
+        cycle_stages = cycle.get("stages", motion["stages"])
+        stage = next((stage for stage in cycle_stages
                       if Decimal(stage["start_s"]) <= elapsed < Decimal(stage["end_s"])), None)
         if stage is None:
             continue
@@ -98,11 +105,11 @@ def _robot_positions(snapshot, sizing, ledger, scene, event_index):
         fraction = ((elapsed - Decimal(stage["start_s"]))
                     / (Decimal(stage["end_s"]) - Decimal(stage["start_s"]))
                     if stage["kind"] == "travel" else Decimal(0))
+        x, y = position_on_path(stage, fraction)
         robots.append({
             "id": cycle["robot_id"], "source_row": cycle["source_row"],
             "floor": start["floor"],
-            "x": Decimal(start["x"]) + (Decimal(end["x"]) - Decimal(start["x"])) * fraction,
-            "y": Decimal(start["y"]) + (Decimal(end["y"]) - Decimal(start["y"])) * fraction,
+            "x": x, "y": y,
         })
     return robots, None
 
@@ -126,11 +133,15 @@ def _svg(scene, robots, reason, moment):
         parts.append(f'<text x="8" y="24" font-size="20">{xml_escape(str(floor["label"]), quote=True)}</text>')
         parts.append('<rect x="0" y="38" width="600" height="380" rx="10" fill="#fff" stroke="#dce8e0"/>')
         parts.append('<g transform="translate(0 38)">')
+        raster = floor.get("plan") or {}
+        if raster.get("image_png"):
+            encoded = base64.b64encode(raster["image_png"]).decode("ascii")
+            parts.append(f'<image x="{raster["x"]}" y="{raster["y"]}" '
+                         f'width="{raster["width"]}" height="{raster["height"]}" '
+                         f'href="data:image/png;base64,{encoded}" opacity="0.70"/>')
         for edge in floor["edges"]:
-            start, end = edge["start"], edge["end"]
             style = "route" if edge["on_route"] else "edge"
-            parts.append(f'<line x1="{start["x"]}" y1="{start["y"]}" x2="{end["x"]}" '
-                         f'y2="{end["y"]}" class="{style}"/>')
+            parts.append(f'<polyline points="{edge["svg_points"]}" fill="none" class="{style}"/>')
         for node in floor["nodes"]:
             label = xml_escape(str(node["label"]), quote=True)
             parts.append(f'<circle cx="{node["x"]}" cy="{node["y"]}" r="5" class="node"/>')
@@ -149,14 +160,24 @@ def _svg(scene, robots, reason, moment):
 def _map_drawing(floor, robots):
     drawing = Drawing(510, 340)
     scale = Decimal("0.85")
+    raster = floor.get("plan") or {}
+    if raster.get("image_png"):
+        drawing.add(GraphicImage(
+            float(Decimal(raster["x"]) * scale),
+            float((Decimal(400) - Decimal(raster["y"]) - Decimal(raster["height"])) * scale),
+            float(Decimal(raster["width"]) * scale),
+            float(Decimal(raster["height"]) * scale),
+            PILImage.open(io.BytesIO(raster["image_png"])),
+        ))
     for edge in floor["edges"]:
-        start, end = edge["start"], edge["end"]
-        drawing.add(Line(float(Decimal(start["x"]) * scale),
-                         float((Decimal(400) - Decimal(start["y"])) * scale),
-                         float(Decimal(end["x"]) * scale),
-                         float((Decimal(400) - Decimal(end["y"])) * scale),
-                         strokeColor=colors.HexColor("#2b6049" if edge["on_route"] else "#a8c0b3"),
-                         strokeWidth=2 if edge["on_route"] else 1))
+        points = edge["path"]
+        for start, end in zip(points, points[1:]):
+            drawing.add(Line(float(Decimal(start["x"]) * scale),
+                             float((Decimal(400) - Decimal(start["y"])) * scale),
+                             float(Decimal(end["x"]) * scale),
+                             float((Decimal(400) - Decimal(end["y"])) * scale),
+                             strokeColor=colors.HexColor("#2b6049" if edge["on_route"] else "#a8c0b3"),
+                             strokeWidth=2 if edge["on_route"] else 1))
     for node in floor["nodes"]:
         x, y = float(Decimal(node["x"]) * scale), float((Decimal(400) - Decimal(node["y"])) * scale)
         drawing.add(Circle(x, y, 4, fillColor=colors.white,
@@ -171,7 +192,11 @@ def _map_drawing(floor, robots):
     return drawing
 
 
-def _pdf(project, run, plan, result, rows, scene, robots, reason, moment, variant):
+def _display_number(value):
+    return "не определено" if value is None else f"{Decimal(str(value)):,.2f}".replace(",", " ")
+
+
+def _pdf(project, run, plan, result, rows, scene, robots, reason, moment, variant, metrics):
     _font()
     stream = io.BytesIO()
     doc = SimpleDocTemplate(stream, pagesize=A4, leftMargin=20 * mm,
@@ -228,6 +253,22 @@ def _pdf(project, run, plan, result, rows, scene, robots, reason, moment, varian
             ))
     story.extend([
         _paragraph(f"Версия расчёта парка: {run.input_snapshot['sizing']['version']}", styles["small"]),
+        _paragraph("Показатели симуляции", styles["h2"]),
+        _paragraph(
+            f"Переданный объём в час: {_display_number(metrics['throughput']['delivered_work_units_per_hour'])}; "
+            f"средняя очередь: {_display_number(metrics['queue']['mean_jobs'])} заданий; "
+            f"среднее ожидание начатых заданий: {_display_number(metrics['waiting']['started_jobs_mean_seconds'])} с; "
+            f"95-й процентиль ожидания: {_display_number(metrics['waiting']['started_jobs_p95_seconds'])} с.", styles["body"]),
+        _paragraph(
+            f"Незавершённая очередь: {metrics['waiting']['unfinished_waiting_jobs']} заданий; "
+            f"их суммарное наблюдаемое ожидание: {_display_number(metrics['waiting']['unfinished_waiting_censored_seconds'])} с. "
+            f"Занятое время парка: {_display_number(metrics['fleet']['busy_robot_seconds'])} робот-с; "
+            f"доступное время: {_display_number(metrics['fleet']['available_robot_seconds'])} робот-с.", styles["body"]),
+        *([_paragraph(
+            f"Подтверждённые общие участки: ожидание {_display_number(metrics['resources']['total_wait_seconds'])} "
+            f"робот-с; резервирований {metrics['resources']['reservations']}. "
+            "Время передачи и итоговый объём рассчитаны с учётом этих ожиданий.",
+            styles["body"])] if "resources" in metrics else []),
         _paragraph("Денежный план", styles["h2"]),
         _paragraph(f"Горизонт: {plan.horizon_months} мес. · валюта: {rows[0]['currency']} · "
                    f"НДС: {'с НДС' if rows[0]['vat_mode'] == 'gross' else 'без НДС'} · "
@@ -235,12 +276,13 @@ def _pdf(project, run, plan, result, rows, scene, robots, reason, moment, varian
         _paragraph("Наблюдаемый объём относится только к указанному периоду. Будущие месячные объёмы "
                    "и суммы являются утверждённым планом организации.", styles["small"]),
     ])
+    investments = initial_investment(rows)
     summary = [["Сценарий", "TCO", "CAPEX", "OPEX", "NPV к baseline"]]
     for name, label in (("baseline", "Действующий процесс"),
                         ("purchase", "Покупка"), ("raas", "RaaS")):
         item = result["scenarios"][name]
-        summary.append([label, item["tco"], item["capex"], item["opex"],
-                        item["npv_vs_baseline"] if name != "baseline" else "-"])
+        summary.append([label, _display_number(item["tco"]), _display_number(item["capex"]), _display_number(item["opex"]),
+                        _display_number(item["npv_vs_baseline"]) if name != "baseline" else "-"])
     table = Table([[_paragraph(cell, styles["table_header"] if index == 0 else styles["table"])
                     for cell in row] for index, row in enumerate(summary)],
                   colWidths=[47 * mm, 28 * mm, 27 * mm, 27 * mm, 41 * mm], repeatRows=1)
@@ -250,9 +292,14 @@ def _pdf(project, run, plan, result, rows, scene, robots, reason, moment, varian
         ("LINEBELOW", (0, 1), (-1, -1), 0.3, colors.HexColor("#dce8e0")),
     ]))
     roi = result["scenarios"]["purchase"]["roi_pct"]
-    roi_label = f"{roi}%" if roi is not None else "не применяется"
+    roi_label = f"{_display_number(roi)}%" if roi is not None else "не применяется"
     payback = result["scenarios"]["purchase"]["payback_month"]
-    story.extend([table, _paragraph(f"Покупка: ROI {roi_label}; "
+    story.extend([table, _paragraph(
+        "TCI — все исходящие вложения месяца 0: " + "; ".join(
+            f"{label}: {_display_number(investments[name])} {rows[0]['currency']}" for name, label in
+            (("baseline", "действующий процесс"), ("purchase", "покупка"), ("raas", "RaaS")))
+        + ". Включает оборотный капитал; CAPEX за горизонт показан отдельно.", styles["small"]),
+        _paragraph(f"Покупка: ROI {roi_label}; "
                                      f"окупаемость: {f'месяц {payback}' if payback is not None else 'не достигнута'}",
                                      styles["small"]),
                   _paragraph("Источники и версии", styles["h2"]),
@@ -266,8 +313,9 @@ def _pdf(project, run, plan, result, rows, scene, robots, reason, moment, varian
                   _paragraph(f"Вариант: строка {variant.source_row}, источник {variant.source_ref}"
                              if variant else "Исходный утверждённый денежный план", styles["small"]),
                   _paragraph("Кадр маршрута", styles["h2"]),
-                  _paragraph(f"Событие на {moment} с. Схема соединяет измеренные точки прямыми "
-                             "и не является точной траекторией движения.", styles["small"])])
+                  _paragraph(f"Событие на {moment} с. Схема соединяет измеренные точки участками "
+                             "или заданными контрольными поворотами; радиусы поворота, препятствия "
+                             "и безопасный габарит не верифицированы.", styles["small"])])
     if robot_ref and robot_ref["catalog_source_kind"] == "manufacturer_supplement":
         story.insert(-3, _paragraph(
             f"Модель производителя: {selected.get('product_url') or 'источник не указан'}; "
@@ -301,6 +349,31 @@ def build_report_bundle(project, run, plan, result, finance_rows, *, event_index
     scenario = run.input_snapshot["scenario"]
     robot_ref = selection_ref(scenario.get("robot_selection"), scenario)
     scene = measured_scene(run.input_snapshot["scenario"])
+    floor_plan_assets = {}
+    exported_plans = []
+    for index, floor in enumerate(scene["floors"]):
+        raster = floor.get("plan")
+        if not raster:
+            continue
+        source = FloorPlanSource.objects.filter(
+            id=raster["id"], project=project, floor=floor["label"],
+            png_sha256=raster["png_sha256"],
+        ).first()
+        if source is None:
+            raise ValueError("Закреплённый план этажа отсутствует или не совпадает с ревизией.")
+        raw = bytes(source.image_png)
+        if hashlib.sha256(raw).hexdigest() != raster["png_sha256"]:
+            raise ValueError("Закреплённый план этажа повреждён.")
+        archive_name = f"floor_plans/floor_{index + 1:02d}_{source.png_sha256[:12]}.png"
+        raster["image_png"] = raw
+        floor_plan_assets[archive_name] = raw
+        exported_plans.append({
+            "floor": floor["label"], "archive_name": archive_name,
+            "png_sha256": source.png_sha256,
+            "original_sha256": source.original_sha256,
+            "source_description": source.source_description,
+            "calibration": scenario["topology_profile"]["floor_plans"][floor["label"]],
+        })
     event = ledger["events"][event_index]
     moment = event["at_s"]
     robots, reason = _robot_positions(
@@ -325,7 +398,10 @@ def build_report_bundle(project, run, plan, result, finance_rows, *, event_index
             for name in SCENARIOS}}
         for month in range(result["horizon_months"] + 1)
     ]
+    metrics = simulation_metrics(ledger, run.availability_plan.rows)
     manifest = {
+        "simulation_metrics": metrics,
+        "initial_investment": {key: str(value) for key, value in initial_investment(finance_rows).items()},
         "project_id": str(project.id), "object_type": project.object_slug,
         "revision": run.revision.number, "run_id": str(run.id),
         "run_created_at": timezone.localtime(run.created_at).isoformat(),
@@ -353,11 +429,21 @@ def build_report_bundle(project, run, plan, result, finance_rows, *, event_index
         "forecast_basis": plan.forecast_basis,
         "discount_rate_source": plan.discount_rate_source,
         "frame_note": reason or "Схема по измеренным точкам",
+        "floor_plan_sources": exported_plans,
         "scenario_snapshot": run.input_snapshot["scenario"],
         "sizing": run.input_snapshot["sizing"],
     }
+    if run.ledger_version == 3:
+        manifest["resource_plan"] = run.input_snapshot["resource_plan"]
+        manifest["resource_wait_seconds"] = ledger["resource_wait_seconds"]
+        manifest["resource_reservation_count"] = len(ledger["resource_reservations"])
     files = {
-        "report.pdf": _pdf(project, run, plan, result, finance_rows, scene, robots, reason, moment, variant),
+        "report.pdf": _pdf(project, run, plan, result, finance_rows, scene, robots, reason, moment, variant, metrics),
+        "simulation_metrics.csv": _csv_bytes(("metric", "value"), [
+            {"metric": f"{section}.{key}", "value": value}
+            for section, entries in metrics.items() if isinstance(entries, dict)
+            for key, value in entries.items()
+        ]),
         "events.csv": _csv_bytes(EVENT_COLUMNS,
                                   [{**event, "work_unit": work_unit} for event in ledger["events"]],
                                   numeric_columns={"at_s", "source_row", "work_units"}),
@@ -368,6 +454,16 @@ def build_report_bundle(project, run, plan, result, finance_rows, *, event_index
         "frame.svg": _svg(scene, robots, reason, moment),
         "manifest.json": json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2).encode("utf-8"),
     }
+    files.update(floor_plan_assets)
+    if run.ledger_version == 3:
+        files["resource_reservations.csv"] = _csv_bytes(
+            ("resource_id", "direction", "start_s", "end_s", "source_row", "robot_id"),
+            ledger["resource_reservations"],
+            numeric_columns={"start_s", "end_s", "source_row"},
+        )
+        files["motion_cycles.json"] = json.dumps(
+            ledger["motion_cycles"], ensure_ascii=False, sort_keys=True, indent=2,
+        ).encode("utf-8")
     archive = io.BytesIO()
     with ZipFile(archive, "w", compression=ZIP_DEFLATED, compresslevel=6) as output:
         for name, data in files.items():

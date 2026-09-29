@@ -30,7 +30,7 @@ def _coordinate(node):
 
 
 def measured_scene(snapshot):
-    """Draw straight schematic links; travel distances stay the measured edge lengths."""
+    """Draw verified edge polylines when present; travel time stays measured."""
     topology = snapshot.get("topology_profile") or {}
     route = transport_cycle_route(topology)
     if route is None or route["status"] != "measured":
@@ -46,35 +46,65 @@ def measured_scene(snapshot):
         point = _coordinate(node)
         if point is not None:
             groups.setdefault(node.get("floor") or "Общий уровень", []).append((node, point))
+    from projects.topology import floor_drawings
+    # The editor, 2D/3D playback, and exported frames must use the same
+    # projection even when no image is attached to the measured floor.
+    plan_drawings = {drawing["floor"]: drawing for drawing in floor_drawings(
+        topology, route["outbound"] if route else {"edges": []})}
     floors = []
     for floor_label, measured in sorted(groups.items(), key=lambda item: item[0]):
-        xs = [point[0] for _, point in measured]
-        ys = [point[1] for _, point in measured]
+        attached = plan_drawings.get(floor_label)
+        visible_ids = {node["id"] for node, _ in measured}
+        waypoint_locations = [
+            (Decimal(point["x_m"]), Decimal(point["y_m"]))
+            for edge in topology["edges"]
+            if edge["start"] in visible_ids and edge["end"] in visible_ids
+            for point in edge.get("waypoints_m") or []
+        ]
+        xs = [point[0] for _, point in measured] + [point[0] for point in waypoint_locations]
+        ys = [point[1] for _, point in measured] + [point[1] for point in waypoint_locations]
         extent_x, extent_y = max(xs) - min(xs), max(ys) - min(ys)
         scale = min(Decimal(520) / max(extent_x, Decimal(1)),
                     Decimal(320) / max(extent_y, Decimal(1)))
         center_x, center_y = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
         positions = {}
         for node, (x, y) in measured:
+            projected = next((item for item in attached["nodes"] if item["id"] == node["id"]), None) if attached else None
             positions[node["id"]] = {
                 "id": node["id"], "label": node["label"],
-                "x": str((Decimal(300) + (x - center_x) * scale).quantize(Decimal("0.01"))),
-                "y": str((Decimal(200) - (y - center_y) * scale).quantize(Decimal("0.01"))),
+                "x": projected["x"] if projected else str((Decimal(300) + (x - center_x) * scale).quantize(Decimal("0.01"))),
+                "y": projected["y"] if projected else str((Decimal(200) - (y - center_y) * scale).quantize(Decimal("0.01"))),
                 "source": node["coordinate_source"],
                 "on_route": node["id"] in route_points,
             }
         edges = []
+        attached_edges = {edge["id"]: edge for edge in attached["edges"]} if attached else {}
         for edge in topology["edges"]:
             if edge["start"] in positions and edge["end"] in positions:
+                drawn = attached_edges.get(edge["id"])
+                if drawn and edge.get("waypoints_m"):
+                    intermediates = [{"floor": floor_label, "x": item["x"], "y": item["y"]}
+                                     for item in drawn["path"][1:-1]]
+                else:
+                    intermediates = [{
+                        "floor": floor_label,
+                        "x": str((Decimal(300) + (Decimal(item["x_m"]) - center_x) * scale).quantize(Decimal("0.01"))),
+                        "y": str((Decimal(200) - (Decimal(item["y_m"]) - center_y) * scale).quantize(Decimal("0.01"))),
+                    } for item in edge.get("waypoints_m") or []]
+                path = [positions[edge["start"]], *intermediates, positions[edge["end"]]]
                 edges.append({
                     "id": edge["id"], "start": positions[edge["start"]],
                     "end": positions[edge["end"]],
                     "on_route": edge["id"] in route_ids,
+                    "resource_id": edge.get("resource_id"),
                     "length_m": edge.get("length_m"),
                     "length_source": edge.get("length_source"),
+                    "path": path,
+                    "geometry_source": edge.get("geometry_source"),
+                    "svg_points": " ".join(f'{point["x"]},{point["y"]}' for point in path),
                 })
         floors.append({"label": floor_label, "nodes": list(positions.values()),
-                       "edges": edges})
+                       "edges": edges, "plan": attached["plan"] if attached else None})
     transitions = []
     seen = set()
     for step in route_steps:
@@ -84,6 +114,8 @@ def measured_scene(snapshot):
             if key not in seen:
                 transitions.append({"from_label": from_node["label"],
                                     "to_label": to_node["label"],
+                                    "from_id": step["from"],
+                                    "to_id": step["to"],
                                     "from_floor": from_node.get("floor"),
                                     "to_floor": to_node.get("floor"),
                                     "length_m": step["length_m"],
@@ -91,6 +123,50 @@ def measured_scene(snapshot):
                 seen.add(key)
     return {"floors": floors, "transitions": transitions,
             "missing_coordinates": missing}
+
+
+def _shape_for_step(scene, topology, step):
+    """Only return an attested shape for the exact chosen edge and direction."""
+    edge = next((item for item in topology["edges"] if item["id"] == step["edge_id"]), None)
+    if not edge or not edge.get("waypoints_m") or not edge.get("geometry_source"):
+        return None
+    match = next((item for floor in scene["floors"] for item in floor["edges"]
+                  if item["id"] == step["edge_id"]), None)
+    if match is None:
+        return None
+    if match["start"]["id"] == step["from"] and match["end"]["id"] == step["to"]:
+        path = match["path"]
+    elif match["end"]["id"] == step["from"] and match["start"]["id"] == step["to"]:
+        path = list(reversed(match["path"]))
+    else:
+        raise PlaybackDataError("Промежуточные точки не соответствуют выбранному направлению.")
+    return [{"floor": item.get("floor") or match["start"].get("floor"),
+             "x": item["x"], "y": item["y"]} for item in path]
+
+
+def position_on_path(stage, fraction):
+    """Screen-space point at a share of the shape's projected arclength."""
+    points = stage.get("path") or (stage["from"], stage["to"])
+    fraction = max(Decimal(0), min(Decimal(1), Decimal(str(fraction))))
+    segments = []
+    total = Decimal(0)
+    for start, end in zip(points, points[1:]):
+        dx, dy = Decimal(end["x"]) - Decimal(start["x"]), Decimal(end["y"]) - Decimal(start["y"])
+        length = (dx * dx + dy * dy).sqrt()
+        segments.append((start, end, length))
+        total += length
+    if total == 0:
+        return Decimal(points[0]["x"]), Decimal(points[0]["y"])
+    left = fraction * total
+    for start, end, length in segments:
+        if left <= length:
+            if length == 0:
+                return Decimal(end["x"]), Decimal(end["y"])
+            portion = left / length
+            return (Decimal(start["x"]) + (Decimal(end["x"]) - Decimal(start["x"])) * portion,
+                    Decimal(start["y"]) + (Decimal(end["y"]) - Decimal(start["y"])) * portion)
+        left -= length
+    return Decimal(points[-1]["x"]), Decimal(points[-1]["y"])
 
 
 def movement_timeline(snapshot, sizing, ledger, scene, *, page_start, page_end):
@@ -108,6 +184,57 @@ def movement_timeline(snapshot, sizing, ledger, scene, *, page_start, page_end):
     if any(point not in positions for step in route_steps
            for point in (step["from"], step["to"])):
         return unavailable("Для движения нужны измеренные координаты всех точек маршрута.")
+    if ledger.get("version") == 3:
+        # v3 records absolute timings for every robot. Shared passages can
+        # delay a single traversal, so a global fixed-duration cycle is wrong.
+        try:
+            start_bound, end_bound = Decimal(str(page_start)), Decimal(str(page_end))
+            if start_bound < 0 or end_bound < start_bound:
+                raise PlaybackDataError("Неверный диапазон воспроизведения.")
+            if not isinstance(ledger.get("motion_cycles"), list):
+                raise PlaybackDataError("В журнале отсутствует движение роботов.")
+            cycles = []
+            for item in ledger["motion_cycles"]:
+                start, end = Decimal(item["start_s"]), Decimal(item["end_s"])
+                if end < start or not (start <= end_bound and end >= start_bound):
+                    if end < start:
+                        raise PlaybackDataError("Неверное время движения робота.")
+                    continue
+                stages = []
+                step_index = 0
+                for stage in item["stages"]:
+                    left, right = Decimal(stage["start_s"]), Decimal(stage["end_s"])
+                    if left < start or right > end or right < left:
+                        raise PlaybackDataError("Время этапа выходит за границы цикла.")
+                    if stage["from"] not in positions or stage["to"] not in positions:
+                        raise PlaybackDataError("Узел движения отсутствует на измеренной схеме.")
+                    stage_display = {
+                        "kind": stage["kind"], "start_s": str(left - start),
+                        "end_s": str(right - start),
+                        "from": positions[stage["from"]], "to": positions[stage["to"]],
+                        **({"resource_id": stage["resource_id"]}
+                           if stage.get("resource_id") else {}),
+                    }
+                    if stage["kind"] in {"travel", "elevator"}:
+                        if step_index >= len(route_steps):
+                            raise PlaybackDataError("В сохранённой траектории больше участков, чем в маршруте.")
+                        route_step = route_steps[step_index]
+                        if (stage["from"], stage["to"]) != (route_step["from"], route_step["to"]):
+                            raise PlaybackDataError("Сохранённая траектория расходится с маршрутом.")
+                        step_index += 1
+                        shape = _shape_for_step(scene, topology, route_step)
+                        if shape and stage["kind"] == "travel":
+                            stage_display["path"] = shape
+                    stages.append(stage_display)
+                if step_index != len(route_steps):
+                    raise PlaybackDataError("В сохранённой траектории отсутствуют участки маршрута.")
+                cycles.append({
+                    "robot_id": item["robot_id"], "source_row": item["source_row"],
+                    "start_s": str(start), "end_s": str(end), "stages": stages,
+                })
+        except (KeyError, InvalidOperation, TypeError, ValueError, IndexError) as exc:
+            raise PlaybackDataError("Фазы движения сохранённого прогона повреждены.") from exc
+        return {"stages": [], "cycles": cycles, "reason": None}
     profile = snapshot.get("workload_profile") or {}
     parameters = profile.get("parameters") or {}
     required = ("observed_speed_m_s", "pickup_time_s", "dropoff_time_s")
@@ -152,11 +279,15 @@ def movement_timeline(snapshot, sizing, ledger, scene, *, page_start, page_end):
     stages = []
     elapsed = Decimal(0)
 
-    def add_stage(kind, start_node, end_node, duration):
+    def add_stage(kind, start_node, end_node, duration, route_step=None):
         nonlocal elapsed
         stage = {"kind": kind, "start_s": str(elapsed),
                  "end_s": str(elapsed + duration),
                  "from": positions[start_node], "to": positions[end_node]}
+        if kind == "travel" and route_step:
+            shape = _shape_for_step(scene, topology, route_step)
+            if shape:
+                stage["path"] = shape
         stages.append(stage)
         elapsed += duration
 
@@ -179,7 +310,7 @@ def movement_timeline(snapshot, sizing, ledger, scene, *, page_start, page_end):
             kind = ("elevator" if positions[step["from"]]["floor"]
                     != positions[step["to"]]["floor"] else "travel")
             duration = ride if kind == "elevator" else Decimal(step["length_m"]) / speed
-            add_stage(kind, step["from"], step["to"], duration)
+            add_stage(kind, step["from"], step["to"], duration, step)
         if leg is outbound_steps:
             add_stage("dropoff", destination, destination, dropoff)
     if (elapsed != cycle or Decimal(stages[[stage["kind"] for stage in stages].index("dropoff")]["end_s"])

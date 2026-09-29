@@ -10,6 +10,8 @@ from django.db import DatabaseError, transaction
 from django.db.models import BooleanField, Case, IntegerField, Q, Value, When
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
+from django.utils.http import urlencode
 from django.views.decorators.http import require_GET
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.cache import never_cache
@@ -34,6 +36,7 @@ from catalog.supplement_publication import (
 )
 from catalog.supplement_uploads import source_assets_from_uploads
 from projects.models import Project
+from projects.catalog_intent import make_catalog_intent_token
 from projects.task_profiles import process_for
 from django.utils import timezone
 
@@ -95,6 +98,11 @@ SUPPLEMENT_ATTRIBUTE_LABELS = {
     "turning_diameter_mm": "Диаметр разворота",
     "manufacturer_max_speed_m_s": "Максимальная скорость",
     "drawbar_pull_n": "Тяговое усилие",
+}
+
+APPLICATION_STATUS_LABELS = {
+    "manufacturer_application": "Заявлено производителем",
+    "vendor_case_reported": "Применение описано в кейсе поставщика",
 }
 
 PRICE_ATTRIBUTES = {
@@ -178,6 +186,8 @@ def index(request):
         families = families.filter(
             Q(name__icontains=query) | Q(company__icontains=query)
             | Q(source_rows__application__scenario__icontains=query)
+            | Q(source_rows__application__cases__icontains=query)
+            | Q(source_rows__application__industry__icontains=query)
         )
     if kind:
         families = families.filter(kind=kind)
@@ -197,7 +207,7 @@ def index(request):
     families = families.distinct().annotate(
         purchase_rank=Case(When(pk__in=priced_family_ids, then=Value(0)),
                            default=Value(1), output_field=IntegerField()),
-    ).order_by("purchase_rank", "name", "id")
+    ).order_by("purchase_rank", "name", "id").prefetch_related("source_rows__offer")
     categories = list(published_families.exclude(display_category="").values_list(
         "display_category", flat=True,
     ).distinct().order_by("display_category"))
@@ -273,6 +283,7 @@ def index(request):
                 if row.family_id in claims_by_family and claim not in claims_by_family[row.family_id]:
                     claims_by_family[row.family_id].append(claim)
     for family in page_families:
+        source_offers = list(family.source_rows.all())
         cards.append({
             "family": family,
             "description": next((claim.value for claim in claims_by_family[family.pk]
@@ -280,6 +291,7 @@ def index(request):
             "price": _purchase_or_rental(claims_by_family[family.pk]),
             "specifications": [claim for claim in claims_by_family[family.pk]
                                if claim.use == "matching_limit" and claim.value is not None][:2],
+            "source_offer_count": len(source_offers),
         })
     return render(request, "catalog/index.html", {
         "batch": batch, "page": page, "query": query, "kind": kind,
@@ -297,6 +309,14 @@ def family_detail(request, family_id):
     family = get_object_or_404(
         CatalogFamily.objects.select_related("batch"), pk=family_id,
     )
+    if "batch" in request.GET:
+        if not request.GET.get("batch"):
+            raise Http404("Версия каталога не опубликована")
+        batch = _selected_batch(request)
+        if batch is None:
+            return HttpResponse("Сервис каталога временно недоступен", status=503)
+        if batch.pk != family.batch_id:
+            raise Http404("Версия каталога не опубликована")
     rows = list(family.source_rows.select_related(
         "application", "offer", "specification"
     ).order_by("record_index"))
@@ -323,10 +343,50 @@ def family_detail(request, family_id):
     product_url = next((claim.source_url for claim in specifications), None) or (product_copy.source_url if product_copy else None)
     manufacturer_url = next((claim.source_url for claim in visible_claims if claim.use == "manufacturer_link"), None)
     description = product_copy.value if product_copy else ""
-    applications = list(dict.fromkeys((row.application.industry, row.application.scenario) for row in rows if row.application.scenario))
+    current_batch, current_evidence = current_source_pair()
+    can_start_project = bool(
+        current_batch and current_evidence
+        and current_batch.pk == family.batch_id
+        and current_evidence.pk == evidence_batch.pk
+    )
+    applications = []
+    source_applications = [{
+        "record_index": row.record_index,
+        "scenario": row.application.scenario,
+        "cases": row.application.cases,
+        "industry": row.application.industry,
+    } for row in rows if row.application.scenario or row.application.cases
+        or row.application.industry]
+    application_claims = CatalogEvidenceClaim.objects.filter(
+        evidence_batch=evidence_batch, use="candidate_application",
+        catalog_rows__family=family,
+    ).distinct().order_by("object_slug", "value")
+    for claim in application_claims:
+        process = process_for(claim.object_slug, claim.value)
+        if process is None:
+            continue
+        application = {
+            "object_slug": claim.object_slug,
+            "object_name": dict(Project.OBJECT_TYPES).get(claim.object_slug, claim.object_slug),
+            "title": process.title,
+            "evidence_status": APPLICATION_STATUS_LABELS.get(claim.status, claim.status),
+            "source_url": claim.source_url,
+        }
+        if can_start_project:
+            token = make_catalog_intent_token(
+                claim.object_slug, process.code, "organizer_v4", str(family.pk),
+                evidence_batch.checksum,
+            )
+            target = reverse("project_create", args=[claim.object_slug])
+            query = urlencode({"process": process.code, "model": token}) if token else ""
+            application["project_url"] = f"{target}?{query}" if query else ""
+        applications.append(application)
+    applications = list({(item["object_slug"], item["title"]): item
+                         for item in applications}.values())
     return render(request, "catalog/detail.html", {
         "family": family, "rows": rows, "evidence_batch": evidence_batch,
         "description": description, "applications": applications,
+        "source_applications": source_applications,
         "specifications": specifications, "prices": prices, "product_url": product_url,
         "manufacturer_url": manufacturer_url,
     })
@@ -343,14 +403,27 @@ def supplement_detail(request, checksum, product_ref):
     )
     object_names = dict(Project.OBJECT_TYPES)
     applications = []
+    publication = SupplementPublication.objects.select_related("batch").filter(
+        pk="storefront",
+    ).first()
+    can_start_project = bool(publication and publication.batch_id == batch.pk)
     for application in product.applications.all().order_by("object_slug", "process_code"):
         process = process_for(application.object_slug, application.process_code)
         if process is not None:
-            applications.append({
+            item = {
                 "object_slug": application.object_slug,
                 "object_name": object_names.get(application.object_slug, application.object_slug),
                 "title": process.title,
-            })
+            }
+            if can_start_project:
+                token = make_catalog_intent_token(
+                    application.object_slug, process.code, "manufacturer_supplement",
+                    product.product_ref, batch.checksum,
+                )
+                target = reverse("project_create", args=[application.object_slug])
+                query = urlencode({"process": process.code, "model": token}) if token else ""
+                item["project_url"] = f"{target}?{query}" if query else ""
+            applications.append(item)
     specifications = [{
         "label": SUPPLEMENT_ATTRIBUTE_LABELS[spec.attribute],
         "value": spec.value, "unit": UNIT_LABELS.get(spec.unit, spec.unit),
