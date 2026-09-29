@@ -9,7 +9,8 @@
   <label>Отрасль<select name="industry"><option value="">Все отрасли</option>{% for option in industries %}<option value="{{ option }}" {% if option == industry %}selected{% endif %}>{{ option }}</option>{% endfor %}</select></label>
   <button class="action-button" type="submit">Найти</button>
 </form>
-{% if supplement_cards %}<section aria-labelledby="supplement-products-title"><h2 id="supplement-products-title">Модели для ваших задач</h2><div class="catalog-grid">
+{% if supplement_cards %}<section aria-labelledby="supplement-products-title"><h2 id="supplement-products-title">Модели для ваших задач</h2>
+  <div class="catalog-grid">
 {% for card in supplement_cards %}<article class="product-card">
   <div class="product-visual" aria-hidden="true"><span>{{ card.product.model|slice:':1' }}</span><small>{{ card.category }}</small></div>
   <div class="product-body"><p class="product-maker">{{ card.product.manufacturer }}</p><h3><a href="{% url 'catalog_supplement_detail' card.checksum card.product.product_ref %}">{{ card.product.model }}{% if card.product.variant != card.product.model %} · {{ card.product.variant }}{% endif %}</a></h3><p class="product-category">{{ card.category }}</p>
@@ -24,7 +25,9 @@
   <div class="product-body"><p class="product-maker">{{ card.family.company }}</p><h2><a href="{% url 'catalog_family_detail' card.family.id %}?batch={{ batch.checksum|urlencode }}&amp;evidence={{ evidence_batch.checksum|default:''|urlencode }}">{{ card.family.name }}</a></h2><p class="product-category">{{ card.family.subtype|default:card.family.type_label }}</p>
   {% if card.description %}<p class="product-description">{{ card.description|truncatechars:170 }}</p>{% endif %}
   {% if card.specifications %}<dl class="product-card-specs">{% for spec in card.specifications %}<div><dt>{{ spec.display_label }}</dt><dd>{{ spec.display_value }} {{ spec.display_unit }}</dd></div>{% endfor %}</dl>{% endif %}
-  <div class="product-bottom">{% if card.price %}<p class="product-price">{% if card.price.attribute == 'purchase_price_floor' or card.price.attribute == 'rental_price_floor' %}от {% endif %}{{ card.price.display_value }} {{ card.price.display_unit }}{% if card.price.scope %}<small>{{ card.price.scope }}</small>{% endif %}</p>{% else %}<p class="product-price product-price-request">Цена не подтверждена</p>{% endif %}<small>{{ card.source_offer_count }} строк(и) с исходными предложениями; валюта и условия проверяются в карточке</small><a href="{% url 'catalog_family_detail' card.family.id %}?batch={{ batch.checksum|urlencode }}&amp;evidence={{ evidence_batch.checksum|default:''|urlencode }}" aria-label="Подробнее: {{ card.family.name }}">Подробнее <span aria-hidden="true">↗</span></a></div>
+  <div class="product-bottom">{% if card.price %}<p class="product-price">{% if card.price.attribute == 'purchase_price_floor' or card.price.attribute == 'rental_price_floor' %}от {% endif %}{{ card.price.display_value }} {{ card.price.display_unit }}{% if card.price.scope %}<small>{{ card.price.scope }}</small>{% endif %}</p>{% else %}<p class="product-price product-price-request">Цена не подтверждена</p>{% endif %}
+    <small></small>
+    <a href="{% url 'catalog_family_detail' card.family.id %}?batch={{ batch.checksum|urlencode }}&amp;evidence={{ evidence_batch.checksum|default:''|urlencode }}" aria-label="Подробнее: {{ card.family.name }}">Подробнее <span aria-hidden="true">↗</span></a></div>
   </div>
 </article>
 {% empty %}{% if not supplement_cards %}<section class="detail-panel"><h2>По запросу ничего не найдено</h2><p class="detail-intro">Измените поисковый запрос или фильтры.</p></section>{% endif %}{% endfor %}
