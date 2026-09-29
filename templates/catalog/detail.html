@@ -1,0 +1,25 @@
+{% extends 'demo/base.html' %}
+{% block title %}{{ family.name }} — каталог{% endblock %}
+{% block content %}
+<nav class="breadcrumbs" aria-label="Навигация"><a href="{% url 'catalog_index' %}?batch={{ family.batch.checksum|urlencode }}&amp;evidence={{ evidence_batch.checksum|default:''|urlencode }}">Каталог</a><span aria-hidden="true">/</span><span>{{ family.name }}</span></nav>
+<section class="product-hero"><div class="product-hero-visual" aria-hidden="true"><span>{{ family.name|slice:':1' }}</span><small>{{ family.subtype|default:family.type_label }}</small></div><div class="product-hero-copy"><p class="eyebrow">{{ family.subtype|default:family.type_label }}</p><h1>{{ family.name }}</h1><p class="product-maker">{{ family.company }}</p>{% if description %}<p class="lead">{{ description }}</p>{% endif %}{% if product_url %}<a class="action-button" href="{{ product_url }}" rel="noopener noreferrer" target="_blank">Страница модели у производителя <span aria-hidden="true">↗</span></a>{% elif manufacturer_url %}<a class="action-button" href="{{ manufacturer_url }}" rel="noopener noreferrer" target="_blank">Сайт производителя <span aria-hidden="true">↗</span></a>{% endif %}</div></section>
+<div class="product-detail-grid">
+  <div>
+    {% if specifications %}<section class="product-section">
+      <p class="eyebrow">ХАРАКТЕРИСТИКИ</p><h2>Технические данные</h2><dl class="product-specs">{% for claim in specifications %}<div><dt>{{ claim.display_label }}</dt><dd>{{ claim.display_value }} {{ claim.display_unit }} <a href="{{ claim.source_url }}" target="_blank" rel="noopener noreferrer" aria-label="Источник характеристики: {{ claim.display_label }}">↗</a></dd></div>{% endfor %}</dl></section>{% endif %}
+    {% if applications or source_applications %}<section class="product-section"><p class="eyebrow">ПРИМЕНЕНИЕ</p><h2>Что сообщают источники</h2>{% if applications %}<h3>Применения, описанные в проверенных сведениях</h3><ul class="product-applications">{% for application in applications %}<li><strong>{{ application.title }}</strong><span>{{ application.object_name }} · {{ application.evidence_status }}</span><a href="{{ application.source_url }}" target="_blank" rel="noopener noreferrer">Источник применения ↗</a>{% if application.project_url %}<a href="{{ application.project_url }}">Проверить модель в проекте →</a>{% endif %}</li>{% endfor %}</ul>{% endif %}{% if source_applications %}<h3>Исходные описания каталога</h3>
+      <ul class="product-applications">{% for application in source_applications %}<li><strong>{{ application.scenario|default:'Сценарий не указан' }}</strong><span>Строка {{ application.record_index }}{% if application.industry %} · отрасль: {{ application.industry }}{% endif %}</span>{% if application.cases %}<p>{{ application.cases }}</p>{% endif %}</li>{% endfor %}</ul>{% endif %}</section>{% endif %}
+  </div>
+  <aside class="product-purchase" aria-label="Стоимость и условия">
+    <p class="eyebrow">УСЛОВИЯ ПРИОБРЕТЕНИЯ</p>
+    {% if prices %}<h2>Сведения, подтверждённые отдельным источником</h2>
+      {% for claim in prices %}<div class="product-offer"><span>{{ claim.display_label }}</span><strong>{% if claim.attribute == 'purchase_price_floor' or claim.attribute == 'rental_price_floor' or claim.attribute == 'commissioning_price_floor' %}от {% endif %}{{ claim.display_value }} {{ claim.display_unit }}</strong>{% if claim.scope %}<p>{{ claim.scope }}</p>{% endif %}<a href="{{ claim.source_url }}" target="_blank" rel="noopener noreferrer">Подробнее об условиях ↗</a>
+      </div>{% endfor %}
+      {% else %}<p class="product-price-request">
+        Подтверждённые цена и валюта отсутствуют
+      </p>{% endif %}<h2>Исходные данные предложения </h2>
+      
+      {% for row in rows %}<div class="product-offer"><strong>Номер в каталоге {{ row.record_index }}</strong><p>Регион: {{ row.offer.region|default:'не указан' }}</p>{% if row.offer.price_status == 'missing' %}<p>Цена в источнике не указана</p>{% else %}<p>Сумма в источнике: {{ row.offer.price_raw }} · валюта не указана</p>{% endif %}<p>{{ row.offer.vat_note }}</p></div>{% endfor %}{% if product_url %}<p class="product-purchase-note">Комплектацию, наличие и окончательные условия покупки уточните у продавца.</p>{% endif %}</aside>
+</div>
+<p><a class="back" href="{% url 'catalog_index' %}?batch={{ family.batch.checksum|urlencode }}&amp;evidence={{ evidence_batch.checksum|default:''|urlencode }}">← Вернуться в каталог</a></p>
+{% endblock %}

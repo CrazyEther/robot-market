@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_DB: robot_market
       POSTGRES_USER: robot
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-robot-local-only}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -15,10 +15,26 @@ services:
   web:
     build: .
     environment:
-      DEBUG: "0"
-      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-local-development-secret-change-before-publication}
+      DEBUG: ${DEBUG:-0}
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1}
-      DATABASE_URL: postgresql://robot:${DB_PASSWORD:-robot-local-only}@db:5432/robot_market
+      DB_HOST: db
+      DB_NAME: robot_market
+      DB_USER: robot
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
+      CATALOG_SOURCE_PATH: /run/source/catalog_export_v4.csv
+      CATALOG_SOURCE_SHA256: ${CATALOG_SOURCE_SHA256:?Set CATALOG_SOURCE_SHA256 from the verified source manifest}
+      RESEARCH_CLAIMS_PATH: /run/source/verified_claims.json
+      RESEARCH_CLAIMS_SHA256: ${RESEARCH_CLAIMS_SHA256:?Set RESEARCH_CLAIMS_SHA256 from the verified research manifest}
+    volumes:
+      - type: bind
+        source: ${CATALOG_SOURCE_FILE:?Set CATALOG_SOURCE_FILE to the permitted v4 catalog path}
+        target: /run/source/catalog_export_v4.csv
+        read_only: true
+      - type: bind
+        source: ${RESEARCH_CLAIMS_FILE:?Set RESEARCH_CLAIMS_FILE to the private verified claims path}
+        target: /run/source/verified_claims.json
+        read_only: true
     ports:
       - "${WEB_PORT:-8000}:8000"
     depends_on:
