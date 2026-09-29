@@ -30,7 +30,7 @@ PROCESSES = (
         "Перевозка грузовой единицы между выбранными точками склада.",
         (TaskField("cargo_mass_kg", "Масса паллеты с грузом", "кг"),
          TaskField("route_width_mm", "Самый узкий участок маршрута", "мм")),
-        ("payload_kg", "minimum_passage_mm", "pallet_loading_interface"),
+        ("payload_kg", "minimum_passage_mm"),
     ),
     ProcessDefinition(
         "airport_baggage_transport", "airport", "Перевозка багажа",

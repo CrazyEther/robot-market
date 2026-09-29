@@ -9,8 +9,8 @@
     {% csrf_token %}<input type="hidden" name="action" value="preview">
     <label for="profile-file">XLSX с листом «{{ expected_sheet }}» или CSV в UTF-8</label>
     <input id="profile-file" name="file" type="file" accept=".xlsx,.csv" required>
-    <label><input type="checkbox" name="source_attested" value="yes" required> Подтверждаю, что значения получены из указанного источника, отражают реальный объект и не содержат персональных сведений.</label>
-    <p class="detail-intro">CSV: object_slug;label;unit;value;min;max;source. Код объекта: {{ project.object_slug }}. Предел файла: 1 МБ. Только обезличенные агрегированные параметры.</p>
+    <label><input type="checkbox" name="source_attested" value="yes" required> Подтверждаю происхождение данных, их соответствие выбранному проекту и отсутствие персональных сведений. Синтетические значения помечены как тестовые.</label>
+    <p class="detail-intro">CSV: object_slug;label;unit;value;min;max;source. Код объекта: {{ project.object_slug }}. Предел файла: 1 МБ. Синтетические примеры допустимы для тестового проекта, если явно помечены в источнике.</p>
     <button class="action-button" type="submit">Показать предварительный просмотр</button>
   </form>
 </section>

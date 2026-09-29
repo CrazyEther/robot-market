@@ -6,7 +6,9 @@ from decimal import Decimal, InvalidOperation
 from catalog.models import CatalogEvidenceClaim, SupplementApplication, SupplementSpecification
 from projects.task_profiles import PALLET_SPEC_BY_HANDOFF_MODE
 
-MATCHING_VERSION = 4
+MATCHING_VERSION = 6
+
+UNIT_ALIASES = {"кг": "kg", "мм": "mm", "Н": "N"}
 
 
 REQUIREMENT_LABELS = {
@@ -81,7 +83,8 @@ def _check_requirement(attribute, claims, parameters):
         return {"code": "unusable_spec", "status": "requires_verification", "label": label,
                 "message": "Число в паспорте модели требует уточнения.", "source_url": source}
     observed = _positive_decimal(reported.get("value"))
-    if observed is None or reported.get("unit") != unit or not reported.get("source"):
+    reported_unit = UNIT_ALIASES.get(reported.get("unit"), reported.get("unit"))
+    if observed is None or reported_unit != unit or not reported.get("source"):
         return {"code": "missing_input", "status": "requires_verification", "label": label,
                 "message": f"Укажите «{input_label}» в {unit} и источник значения.", "source_url": source}
     rejected = observed < capacity if attribute == "minimum_passage_mm" else observed > capacity
@@ -119,6 +122,15 @@ def _pallet_handoff_checks(claims, parameters):
     ]
 
 
+def _candidate_checks(process, claims, parameters):
+    warehouse_pallets = process.code == "warehouse_pallet_transfer"
+    checks = [_check_requirement(attribute, claims, parameters)
+              for attribute in process.required_specs]
+    if warehouse_pallets:
+        checks.extend(_pallet_handoff_checks(claims, parameters))
+    return checks
+
+
 def match_candidates(evidence_batch, process, task_profile):
     """Return source-linked rows; never infer candidate applications from keywords."""
     applications = CatalogEvidenceClaim.objects.filter(
@@ -149,10 +161,7 @@ def match_candidates(evidence_batch, process, task_profile):
     for candidate in candidate_rows.values():
         row = candidate["row"]
         applications = candidate["applications"]
-        checks = [_check_requirement(attribute, claims_by_row[row.pk], parameters)
-                  for attribute in process.required_specs]
-        if process.code == "warehouse_pallet_transfer":
-            checks.extend(_pallet_handoff_checks(claims_by_row[row.pk], parameters))
+        checks = _candidate_checks(process, claims_by_row[row.pk], parameters)
         statuses = {check["status"] for check in checks}
         status = "reject" if "reject" in statuses else "requires_verification" if "requires_verification" in statuses else "fit"
         results.append({
@@ -197,10 +206,7 @@ def match_supplement_candidates(batch, process, task_profile):
     for product_id, item in products.items():
         product = item["product"]
         claims = claims_by_product[product_id]
-        checks = [_check_requirement(attribute, claims, parameters)
-                  for attribute in process.required_specs]
-        if process.code == "warehouse_pallet_transfer":
-            checks.extend(_pallet_handoff_checks(claims, parameters))
+        checks = _candidate_checks(process, claims, parameters)
         statuses = {check["status"] for check in checks}
         status = ("reject" if "reject" in statuses else
                   "requires_verification" if "requires_verification" in statuses else "fit")
